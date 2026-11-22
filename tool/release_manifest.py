@@ -13,6 +13,7 @@ def main():
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--android", type=Path, required=True)
     parser.add_argument("--linux", type=Path, required=True)
+    parser.add_argument("--windows", type=Path)
     parser.add_argument("--tag")
     parser.add_argument("--output", type=Path, default=Path("haven-updates.json"))
     args = parser.parse_args()
@@ -29,7 +30,10 @@ def main():
         parser.error(f"The release tag must be v{version}")
 
     artifacts = {}
-    for platform, path in [("android", args.android), ("linux-x64", args.linux)]:
+    packages = [("android", args.android), ("linux-x64", args.linux)]
+    if args.windows is not None:
+        packages.append(("windows-x64", args.windows))
+    for platform, path in packages:
         length = path.stat().st_size
         if not 0 < length <= 160 * 1024 * 1024:
             parser.error(f"{path.name} is outside the supported update size")

@@ -32,6 +32,9 @@ jobs:
       - run: flutter test
       - name: Build Android APK
         env:
+          HAVEN_FIREBASE_PROJECT: ${{ vars.HAVEN_FIREBASE_PROJECT }}
+          HAVEN_FIREBASE_WEB_API_KEY: ${{ vars.HAVEN_FIREBASE_WEB_API_KEY }}
+          HAVEN_GOOGLE_WEB_CLIENT_ID: ${{ vars.HAVEN_GOOGLE_WEB_CLIENT_ID }}
           HAVEN_KEYSTORE_BASE64: ${{ secrets.HAVEN_RELEASE_KEYSTORE_BASE64 }}
           HAVEN_RELEASE_STORE_PASSWORD: ${{ secrets.HAVEN_RELEASE_STORE_PASSWORD }}
           HAVEN_RELEASE_KEY_ALIAS: ${{ secrets.HAVEN_RELEASE_KEY_ALIAS }}
@@ -48,6 +51,11 @@ jobs:
             trap 'rm -f -- "$HAVEN_RELEASE_KEYSTORE"' EXIT
             (umask 077; printf '%s' "$HAVEN_KEYSTORE_BASE64" | base64 --decode > "$HAVEN_RELEASE_KEYSTORE")
             options+=("--dart-define=HAVEN_UPDATE_FEED=https://github.com/$GITHUB_REPOSITORY/releases/latest/download/haven-updates.json")
+          fi
+          if [[ -n "$HAVEN_FIREBASE_PROJECT" && -n "$HAVEN_FIREBASE_WEB_API_KEY" && -n "$HAVEN_GOOGLE_WEB_CLIENT_ID" ]]; then
+            options+=("--dart-define=HAVEN_FIREBASE_PROJECT=$HAVEN_FIREBASE_PROJECT"
+              "--dart-define=HAVEN_FIREBASE_WEB_API_KEY=$HAVEN_FIREBASE_WEB_API_KEY"
+              "--dart-define=HAVEN_GOOGLE_WEB_CLIENT_ID=$HAVEN_GOOGLE_WEB_CLIENT_ID")
           fi
           flutter build apk --release "${options[@]}"
           cp build/app/outputs/flutter-apk/app-release.apk Haven-Android.apk
@@ -80,8 +88,24 @@ jobs:
           name: haven-linux
           path: Haven-Linux-x86_64.tar.gz
 
-  ios:
+  windows:
     needs: linux
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.50.1'
+      - run: flutter pub get
+      - run: flutter build windows --release
+      - run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath Haven-Windows-x86_64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: haven-windows
+          path: Haven-Windows-x86_64.zip
+
+  ios:
+    needs: windows
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -93,7 +117,7 @@ jobs:
 
   publish:
     if: github.ref_type == 'tag'
-    needs: [android, linux]
+    needs: [android, linux, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -105,17 +129,20 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: haven-linux
-      - name: Publish Android and Linux release
+      - uses: actions/download-artifact@v4
+        with:
+          name: haven-windows
+      - name: Publish Haven release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           python3 tool/release_manifest.py --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME" \
-            --tag "$GITHUB_REF_NAME" --android Haven-Android.apk --linux Haven-Linux-x86_64.tar.gz
+            --tag "$GITHUB_REF_NAME" --android Haven-Android.apk --linux Haven-Linux-x86_64.tar.gz --windows Haven-Windows-x86_64.zip
           if [[ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null || true)" == true ]]; then
-            gh release upload "$GITHUB_REF_NAME" Haven-Android.apk Haven-Linux-x86_64.tar.gz haven-updates.json
+            gh release upload "$GITHUB_REF_NAME" Haven-Android.apk Haven-Linux-x86_64.tar.gz Haven-Windows-x86_64.zip haven-updates.json
             gh release edit "$GITHUB_REF_NAME" --draft=false --latest
           else
-            gh release create "$GITHUB_REF_NAME" Haven-Android.apk Haven-Linux-x86_64.tar.gz haven-updates.json \
+            gh release create "$GITHUB_REF_NAME" Haven-Android.apk Haven-Linux-x86_64.tar.gz Haven-Windows-x86_64.zip haven-updates.json \
               --verify-tag --latest --generate-notes
           fi

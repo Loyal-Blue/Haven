@@ -2,6 +2,15 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    match /havenAppearances/{userId} {
+      allow get: if request.auth != null && request.auth.uid == userId;
+      allow create, update: if request.auth != null && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['modified', 'settings'])
+        && request.resource.data.modified is int
+        && request.resource.data.modified >= 0
+        && request.resource.data.settings is string
+        && request.resource.data.settings.size() <= 4096;
+    }
     match /{document=**} {
       allow read, write: if false;
     }

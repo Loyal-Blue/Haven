@@ -24,7 +24,10 @@ class HavenStore extends ChangeNotifier {
       final existing = HavenState.fromJson(
         jsonDecode(await file.readAsString()) as Json,
       );
-      final current = advanceTownExpansion(existing, openedAt);
+      final current = applyTaskReset(
+        advanceTownExpansion(existing, openedAt),
+        openedAt,
+      );
       final store = HavenStore(file, current);
       if (!identical(current, existing)) await store._save(current);
       return store;

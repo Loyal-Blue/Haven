@@ -44,17 +44,25 @@ void main() {
       expect(find.text('Build'), findsNothing);
       expect(store.state.buildings, hasLength(1));
 
-      await tester.tap(find.text('AI'));
+      Finder bottom(String label) => find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text(label),
+      );
+      await tester.tap(bottom('More'));
       await tester.pumpAndSettle();
-      expect(find.text('Set up Ollama'), findsOneWidget);
+      await tester.tap(find.text('Haven AI'));
+      await tester.pumpAndSettle();
+      expect(find.text('Set up provider'), findsOneWidget);
+      await tester.tap(bottom('My'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Money'));
       await tester.pumpAndSettle();
       expect(find.text('Net cash flow'), findsOneWidget);
       expect(find.text('New transaction'), findsOneWidget);
-      await tester.tap(find.text('Planner'));
+      await tester.tap(bottom('Event'));
       await tester.pumpAndSettle();
       expect(find.text('Schedule task'), findsOneWidget);
-      await tester.tap(find.text('More'));
+      await tester.tap(bottom('More'));
       await tester.pumpAndSettle();
       expect(find.text('Hobbies'), findsOneWidget);
       expect(tester.takeException(), isNull);
@@ -76,7 +84,7 @@ void main() {
     await tester.pumpWidget(HavenApp(store: store));
     await tester.pumpAndSettle();
     expect(find.byType(NavigationBar), findsNothing);
-    expect(find.text('Local save'), findsOneWidget);
+    expect(find.text('Routine'), findsOneWidget);
     expect(find.text('Willowbrook'), findsOneWidget);
     final terrain = tester.widget<Image>(
       find.byWidgetPredicate(
@@ -88,7 +96,7 @@ void main() {
       ),
     );
     expect(terrain.fit, BoxFit.fill);
-    await tester.tap(find.text('Tasks'));
+    await tester.tap(find.text('Todo'));
     await tester.pumpAndSettle();
     expect(find.text('New task'), findsOneWidget);
     expect(tester.takeException(), isNull);

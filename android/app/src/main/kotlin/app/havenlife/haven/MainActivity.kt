@@ -1,10 +1,12 @@
 package app.havenlife.haven
 
+import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.provider.CalendarContract
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
@@ -40,6 +42,35 @@ class MainActivity : FlutterActivity() {
                     result.error("update_invalid", failure.message, null)
                 } catch (failure: Exception) {
                     result.error("update_unavailable", "Android could not open the update installer.", null)
+                }
+            }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.havenlife.haven/reminders")
+            .setMethodCallHandler { call, result ->
+                try {
+                    when (call.method) {
+                        "schedule" -> {
+                            ReminderReceiver.replace(this, call.argument<List<Map<String, Any>>>("tasks").orEmpty())
+                            if (call.argument<Boolean>("permission") == true && Build.VERSION.SDK_INT >= 33 &&
+                                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                            ) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 200)
+                            result.success(null)
+                        }
+                        "calendar" -> {
+                            val start = call.argument<Number>("start")?.toLong() ?: 0L
+                            val end = call.argument<Number>("end")?.toLong() ?: 0L
+                            val intent = Intent(Intent.ACTION_INSERT, CalendarContract.Events.CONTENT_URI)
+                                .putExtra(CalendarContract.Events.TITLE, call.argument<String>("title"))
+                                .putExtra(CalendarContract.Events.DESCRIPTION, call.argument<String>("notes"))
+                                .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, start)
+                                .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, end)
+                                .putExtra(CalendarContract.EXTRA_EVENT_ALL_DAY, call.argument<Boolean>("allDay") == true)
+                            startActivity(intent)
+                            result.success(true)
+                        }
+                        else -> result.notImplemented()
+                    }
+                } catch (failure: Exception) {
+                    result.error("reminder_unavailable", "Android could not open the reminder or calendar.", null)
                 }
             }
     }

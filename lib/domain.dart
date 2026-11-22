@@ -1,5 +1,8 @@
 import 'dart:math';
 
+import 'theme_settings.dart';
+import 'planner_data.dart';
+
 typedef Json = Map<String, dynamic>;
 
 String newId() {
@@ -56,12 +59,14 @@ class TownExpansion {
     this.throughWeek, {
     this.districtCount = 1,
     this.lastWeek,
+    this.history = const [],
     this.automatic = true,
   });
 
   final String throughWeek;
   final int districtCount;
   final WeekProgress? lastWeek;
+  final List<WeekProgress> history;
   final bool automatic;
 
   String get nextMonday => dayKey(calendarDay(dateFromKey(throughWeek), 7));
@@ -71,12 +76,16 @@ class TownExpansion {
     'districtCount': districtCount,
     'automatic': automatic,
     if (lastWeek != null) 'lastWeek': lastWeek!.toJson(),
+    'history': history.map((week) => week.toJson()).toList(),
   };
 
   static TownExpansion fromJson(Json json) => TownExpansion(
     json['throughWeek'] as String,
     districtCount: json['districtCount'] as int,
     automatic: json['automatic'] == true,
+    history: List.unmodifiable(
+      decodeList(json['history'] ?? [], WeekProgress.fromJson),
+    ),
     lastWeek: json['lastWeek'] == null
         ? null
         : WeekProgress.fromJson(json['lastWeek'] as Json),
@@ -174,6 +183,10 @@ class Task {
     this.archived = false,
     this.createdOn,
     this.archivedOn,
+    this.interval = 1,
+    this.projectId,
+    this.priority = TaskPriority.normal,
+    this.reminderMinute,
   });
 
   final String id;
@@ -186,16 +199,28 @@ class Task {
   final bool archived;
   final String? createdOn;
   final String? archivedOn;
+  final int interval;
+  final String? projectId;
+  final TaskPriority priority;
+  final int? reminderMinute;
 
   bool occursOn(String day) => !archived && scheduledOn(day);
 
   bool scheduledOn(String day) {
     if (day.compareTo(due) < 0) return false;
-    return switch (repeat) {
-      Repeat.once => day == due,
-      Repeat.daily => true,
-      Repeat.weekly => dateFromKey(day).weekday == dateFromKey(due).weekday,
-    };
+    if (repeat == Repeat.once) return day == due;
+    int ordinal(String value) {
+      final date = dateFromKey(value);
+      return DateTime.utc(
+            date.year,
+            date.month,
+            date.day,
+          ).millisecondsSinceEpoch ~/
+          Duration.millisecondsPerDay;
+    }
+
+    final spacing = repeat == Repeat.weekly ? interval * 7 : interval;
+    return (ordinal(day) - ordinal(due)) % spacing == 0;
   }
 
   String occurrence(String day) => repeat == Repeat.once ? 'once' : day;
@@ -211,6 +236,10 @@ class Task {
     archived: true,
     createdOn: createdOn,
     archivedOn: archivedOn ?? day,
+    interval: interval,
+    projectId: projectId,
+    priority: priority,
+    reminderMinute: reminderMinute,
   );
 
   Json toJson() => {
@@ -224,6 +253,10 @@ class Task {
     'archived': archived,
     if (createdOn != null) 'createdOn': createdOn,
     if (archivedOn != null) 'archivedOn': archivedOn,
+    'interval': interval,
+    'projectId': projectId,
+    'priority': priority.name,
+    'reminderMinute': reminderMinute,
   };
 
   static Task fromJson(Json json) => Task(
@@ -237,6 +270,10 @@ class Task {
     archived: json['archived'],
     createdOn: json['createdOn'] as String?,
     archivedOn: json['archivedOn'] as String?,
+    interval: (json['interval'] as int? ?? 1).clamp(1, 99),
+    projectId: json['projectId'] as String?,
+    priority: TaskPriority.values.byName(json['priority'] ?? 'normal'),
+    reminderMinute: json['reminderMinute'] as int?,
   );
 }
 
@@ -440,7 +477,11 @@ class HavenState {
   HavenState({
     this.townName = 'Willowbrook',
     this.theme = ThemePreference.system,
+    this.appearance = const ThemeSettings(),
+    this.appearanceUpdatedAt = 0,
     this.expansion,
+    this.taskReset = const TaskReset(),
+    List<Project> projects = const [],
     Map<String, int> budgets = const {},
     List<Task> tasks = const [],
     List<LedgerEntry> ledger = const [],
@@ -448,7 +489,8 @@ class HavenState {
     List<MoneyEntry> money = const [],
     List<Hobby> hobbies = const [],
     List<PracticeSession> sessions = const [],
-  }) : budgets = Map.unmodifiable(budgets),
+  }) : projects = List.unmodifiable(projects),
+       budgets = Map.unmodifiable(budgets),
        tasks = List.unmodifiable(tasks),
        ledger = List.unmodifiable(ledger),
        buildings = List.unmodifiable(buildings),
@@ -458,7 +500,11 @@ class HavenState {
 
   final String townName;
   final ThemePreference theme;
+  final ThemeSettings appearance;
+  final int appearanceUpdatedAt;
   final TownExpansion? expansion;
+  final TaskReset taskReset;
+  final List<Project> projects;
   final Map<String, int> budgets;
   final List<Task> tasks;
   final List<LedgerEntry> ledger;
@@ -512,6 +558,29 @@ class HavenState {
   );
   bool completed(Task task, String day) =>
       ledger.any((entry) => entry.id == taskGrantId(task, day));
+  bool checked(Task task, String day) {
+    final id = taskGrantId(task, day);
+    if (taskReset.rechecked.contains(id)) return true;
+    for (var index = ledger.length - 1; index >= 0; index--) {
+      final entry = ledger[index];
+      if (entry.id == id) {
+        return index >= taskReset.cutoff ||
+            (task.repeat == Repeat.once && entry.day.compareTo(day) < 0);
+      }
+    }
+    return false;
+  }
+
+  List<Task> projectTasks(String id) =>
+      tasks.where((task) => task.projectId == id && !task.archived).toList();
+  int projectCompleted(String id) => projectTasks(id)
+      .where(
+        (task) => ledger.any(
+          (entry) => entry.kind == LedgerKind.task && entry.sourceId == task.id,
+        ),
+      )
+      .length;
+
   static String taskGrantId(Task task, String day) =>
       'task/${task.id}/${task.occurrence(day)}';
 
@@ -522,7 +591,7 @@ class HavenState {
             !task.archived &&
             task.repeat == Repeat.once &&
             task.due.compareTo(day) < 0 &&
-            !completed(task, day);
+            !checked(task, day);
       }).toList();
 
   Resources remainingRewards(String day) {
@@ -535,7 +604,11 @@ class HavenState {
   HavenState copyWith({
     String? townName,
     ThemePreference? theme,
+    ThemeSettings? appearance,
+    int? appearanceUpdatedAt,
     TownExpansion? expansion,
+    TaskReset? taskReset,
+    List<Project>? projects,
     Map<String, int>? budgets,
     List<Task>? tasks,
     List<LedgerEntry>? ledger,
@@ -546,7 +619,11 @@ class HavenState {
   }) => HavenState(
     townName: townName ?? this.townName,
     theme: theme ?? this.theme,
+    appearance: appearance ?? this.appearance,
+    appearanceUpdatedAt: appearanceUpdatedAt ?? this.appearanceUpdatedAt,
     expansion: expansion ?? this.expansion,
+    taskReset: taskReset ?? this.taskReset,
+    projects: projects ?? this.projects,
     budgets: budgets ?? this.budgets,
     tasks: tasks ?? this.tasks,
     ledger: ledger ?? this.ledger,
@@ -560,7 +637,11 @@ class HavenState {
     'version': 1,
     'townName': townName,
     'theme': theme.name,
+    'appearance': appearance.toJson(),
+    'appearanceUpdatedAt': appearanceUpdatedAt,
     if (expansion != null) 'expansion': expansion!.toJson(),
+    'taskReset': taskReset.toJson(),
+    'projects': projects.map((project) => project.toJson()).toList(),
     'budgets': budgets,
     'tasks': tasks.map((task) => task.toJson()).toList(),
     'ledger': ledger.map((entry) => entry.toJson()).toList(),
@@ -577,9 +658,13 @@ class HavenState {
     return HavenState(
       townName: json['townName'],
       theme: ThemePreference.values.byName(json['theme']),
+      appearance: ThemeSettings.fromJson(json['appearance'] as Json?),
+      appearanceUpdatedAt: json['appearanceUpdatedAt'] as int? ?? 0,
       expansion: json['expansion'] == null
           ? null
           : TownExpansion.fromJson(json['expansion'] as Json),
+      taskReset: TaskReset.fromJson(json['taskReset'] as Json?),
+      projects: decodeList(json['projects'] ?? [], Project.fromJson),
       budgets: Map<String, int>.from(json['budgets']),
       tasks: decodeList(json['tasks'], Task.fromJson),
       ledger: decodeList(json['ledger'], LedgerEntry.fromJson),
@@ -594,9 +679,26 @@ class HavenState {
 List<T> decodeList<T>(List<dynamic> rows, T Function(Json) decode) =>
     rows.map((row) => decode(row as Json)).toList();
 
-WeekProgress weeklyProgress(HavenState state, DateTime week) {
+WeekProgress weeklyProgress(HavenState state, DateTime week) =>
+    periodProgress(state, week, 7);
+
+WeekProgress periodProgress(
+  HavenState state,
+  DateTime week,
+  int days, {
+  bool useSettlement = false,
+}) {
+  if (useSettlement) {
+    final history = state.expansion;
+    final key = dayKey(week);
+    final settled = history?.history
+        .where((record) => record.week == key)
+        .firstOrNull;
+    if (settled != null) return settled;
+    if (history?.lastWeek?.week == key) return history!.lastWeek!;
+  }
   final start = dayKey(week);
-  final end = dayKey(calendarDay(week, 7));
+  final end = dayKey(calendarDay(week, days));
   final finished = <String>{};
   final completedBefore = <String>{};
   for (final entry in state.ledger.where(
@@ -629,7 +731,7 @@ WeekProgress weeklyProgress(HavenState state, DateTime week) {
       }
       continue;
     }
-    for (var offset = 0; offset < 7; offset++) {
+    for (var offset = 0; offset < days; offset++) {
       final day = dayKey(calendarDay(week, offset));
       if ((task.createdOn == null || day.compareTo(task.createdOn!) >= 0) &&
           (archivedOn == null || day.compareTo(archivedOn) < 0) &&
@@ -678,9 +780,15 @@ HavenState advanceTownExpansion(HavenState state, DateTime now) {
   var district = 0;
   var districtCount = previous.districtCount;
   WeekProgress? last;
+  final history = <WeekProgress>[
+    ...previous.history,
+    if (previous.history.isEmpty && previous.lastWeek != null)
+      previous.lastWeek!,
+  ];
   for (final closed in eligibleWeeks.toList()..sort()) {
     final progress = weeklyProgress(state, dateFromKey(closed));
     last = progress;
+    history.add(progress);
     for (var index = 0; index < progress.buildings; index++) {
       var plot = plots
           .where((plot) => !occupied.contains((district, plot)))
@@ -710,6 +818,7 @@ HavenState advanceTownExpansion(HavenState state, DateTime now) {
       monday,
       districtCount: districtCount,
       lastWeek: last,
+      history: List.unmodifiable(history),
     ),
     buildings: buildings,
   );
@@ -720,7 +829,22 @@ class RuleFailure implements Exception {
   final String message;
 }
 
+HavenState applyTaskReset(HavenState state, DateTime now) {
+  final boundary = state.taskReset.due(now);
+  if (boundary == null) return state;
+  final cutoff = state.ledger.indexWhere(
+    (entry) => entry.kind == LedgerKind.task && !entry.at.isBefore(boundary),
+  );
+  return state.copyWith(
+    taskReset: state.taskReset.after(
+      boundary,
+      cutoff < 0 ? state.ledger.length : cutoff,
+    ),
+  );
+}
+
 HavenState completeTask(HavenState state, String id, DateTime now) {
+  state = applyTaskReset(state, now);
   final task = state.tasks
       .where((task) => task.id == id && !task.archived)
       .firstOrNull;
@@ -732,7 +856,12 @@ HavenState completeTask(HavenState state, String id, DateTime now) {
   if (!eligible) {
     throw const RuleFailure('This task is scheduled for another day.');
   }
-  if (state.completed(task, day)) return state;
+  if (state.checked(task, day)) return state;
+  if (state.completed(task, day)) {
+    return state.copyWith(
+      taskReset: state.taskReset.check(HavenState.taskGrantId(task, day)),
+    );
+  }
   final grant = LedgerEntry(
     HavenState.taskGrantId(task, day),
     LedgerKind.task,

@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Take a photo of a checklist or assignment to create Haven tasks.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Choose an image to create Haven tasks.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Connect to your Ollama server on your local network.</string>
 	<key>NSAppTransportSecurity</key>

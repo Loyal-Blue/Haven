@@ -1,71 +1,69 @@
 # Haven
 
-Haven grows a pixel-art town from your weekly task completion. It runs offline as a guest.
+Haven grows a pixel-art town from your weekly task completion. You can use it offline as a guest and keep an existing Haven save when upgrading.
 
-- **Town** shows your weekly percentage and projected buildings. At the end of Sunday in your local time, the town builds automatically. A productive week earns one to five buildings, rounding up one building per 20 percentage points. New districts open when more room is needed. Missed weeks are processed when you return.
-- **Tasks** supports one-off, daily and weekly schedules, notes, effort and completion history.
-- **Planner** shows a week at a time and lets you add or edit dated tasks.
-- **Money** records manual EUR transactions, monthly spending by category and a monthly spending limit.
-- **AI** connects to your Ollama model for planning and breaking down tasks.
-- **More** contains hobbies, practice goals, settings and updates.
+- **Town** shows your districts, weekly score, upcoming plans, project progress and monthly finances. At the end of Sunday in your local time the town grows automatically. Each 20 percentage points, rounded up, earns a building, up to five per week. Haven catches up on missed construction when you return.
+- **Todo and Routine** manage one-time tasks and tasks that recur every few days or weeks. Reset checkmarks manually or at a chosen daily or weekly time. Completion history and town credit are preserved.
+- **Event** shows week and month calendars, dated tasks and project milestones. Android tasks can be added to your device calendar from their options menu. Android and iOS use local task notifications when permitted. On desktop, reminders appear while the app is open.
+- **My** contains projects and subtasks, weekly and monthly reports, town growth history, and EUR spending and budgets.
+- **More** contains Haven AI, settings, appearance, sync, updates and hobbies.
 
-Existing Android installations can upgrade using the same signing key and keep the local save. Existing buildings stay in their districts. Automatic construction starts with the first week you open Haven 0.4.
+## Appearance
 
-## AI assistant
+Open **More → Settings → Appearance**. Choose a preset or adjust individual colors using the sliders or hex field. The preview updates as you edit and colors apply as soon as you tap **Apply**. Black & White includes separate White and Black variants with a grayscale town. Custom colors are kept when you toggle Black & White off. Font scale, high contrast and reduced motion also save locally.
 
-Open **AI → Set up Ollama**, enter your server and use the model name shown by `ollama list`. If both apps run on the same Linux device, the default Ollama address is `http://127.0.0.1:11434`. For Android, enter the reachable private IP and port of the computer running Ollama, or an HTTPS endpoint. Ollama must be listening on that interface and reachable from the phone. Keep a plain HTTP endpoint on a trusted private network or VPN.
+## Haven AI
 
-Messages are sent to the server you configure. The optional **Include this week’s tasks** switch sends task titles and completion counts with the message. It starts off, and the assistant has no app write access. Chat history stays in memory until the app closes or you clear it.
+Choose **More → Haven AI → Set up provider**. Use an API key and model for OpenAI, Anthropic or Google Gemini. API usage and billing are separate from ChatGPT and Claude subscriptions. Provider and model preferences are saved locally. API keys and chat history stay in memory for the current app session.
+
+Use Ollama on the same Linux device at `http://127.0.0.1:11434`, or enter a private network or HTTPS address reachable from Android. Select a model using the name from `ollama list`. The OpenAI-compatible option accepts a custom base URL and requires HTTPS when an API key is supplied.
+
+Choose **Photo tasks** from Todo, then take a photo on Android or iOS or choose a saved image. Confirm the image before it is sent to the selected provider. A vision-capable model creates up to 12 deduplicated tasks for today. The optional **Include this week’s tasks** switch shares task and project titles and weekly progress to help with planning. Transaction details and task notes are excluded from automatic context.
+
+## Google sign-in and appearance sync
+
+A Firebase project with Google Authentication and Firestore is required for sync. Guest saves work without it. Sync includes appearance preferences and accessibility settings. Tasks, finances, and other productivity data stay local.
+
+1. Enable Google sign-in in Firebase Authentication, create the default Firestore database and deploy the rules in `firebase/`.
+2. Register Android application ID `app.havenlife.haven` and the SHA-1 fingerprint of the key signing your APK. For GitHub release builds the SHA-1 is `F7:D0:41:53:51:A3:69:8C:3D:97:9C:95:C3:BC:0F:A5:87:76:43:41`.
+3. Build with `--dart-define=HAVEN_FIREBASE_PROJECT=...`, `--dart-define=HAVEN_FIREBASE_WEB_API_KEY=...` and `--dart-define=HAVEN_GOOGLE_WEB_CLIENT_ID=...`. GitHub Actions accepts matching repository variables for Android.
+4. On iOS register bundle ID `app.havenlife.haven`, add the reversed iOS Google client ID as a URL scheme in `ios/Runner/Info.plist`, and supply `--dart-define=HAVEN_GOOGLE_IOS_CLIENT_ID=...` alongside the previous defines.
+5. On a configured Android or iOS build, choose **More → Appearance sync → Sign in with Google**. The newer saved appearance syncs automatically while signed in. Use **Sync now** to check immediately.
 
 ## Build order
 
-The project targets **Android → Linux → iOS**. The shared client uses Flutter 3.50.1 with Dart 3.14. Android needs a JDK and Android SDK with API 36, build-tools 36 and NDK 28.2.13676358. Linux uses GTK 3, CMake, Ninja and Clang. iOS uses macOS and Xcode.
+Haven uses Flutter 3.50.1 and Dart 3.14. Build order is **Android → Linux → Windows → iOS**. Android requires JDK 21, API 36 and NDK 28.2.13676358.
 
-On Arch Linux, install the Flutter SDK and Android SDK first. For Flutter unpacked at `~/development/flutter`, these commands use Fish:
+On Arch Linux, these commands use Fish syntax:
 
 ```fish
 fish_add_path ~/development/flutter/bin
-flutter doctor -v
 flutter pub get
 flutter analyze
 flutter test
 
 # Android
-flutter devices
 flutter run -d ANDROID_DEVICE_ID
 flutter build apk --release
 
-# Linux on a machine with GTK 3, Clang, CMake, Ninja and pkg-config
-flutter run -d linux
+# Linux with GTK 3, Clang, CMake, Ninja and pkg-config
 flutter build linux --release
-```
-
-The Android APK is under `build/app/outputs/flutter-apk/`. The Linux build is under `build/linux/x64/release/bundle/`. For a Linux archive with in-place updates:
-
-```fish
 tool/package_linux.sh build/linux/x64/release/bundle Haven-Linux-x86_64.tar.gz
 tar -xzf Haven-Linux-x86_64.tar.gz
 ./Haven-Linux/haven
 ```
 
-Keep the extracted folder writable by your user. Linux needs GTK 3, GLES and a graphical session.
-
-On a Mac, run `flutter pub get`, then `flutter build ios --release --no-codesign` to check the iOS runner. A device install or an App Store build needs Xcode signing configured for the project.
+On Windows with Visual Studio's Desktop development with C++ workload, run `flutter build windows --release`. On a Mac with Xcode, run `flutter build ios --release --no-codesign`. Installing on iOS needs Apple signing and distribution.
 
 ## Automatic updates
 
-The default update feed is the [Haven GitHub release feed](https://github.com/Loyal-Blue/Haven/releases/latest/download/haven-updates.json). In **More → Settings → Updates**, check immediately, turn updates off, or change the feed. With automatic updates enabled, Haven checks on launch and while it stays open, with six hours between automatic checks during a session. 
+Haven uses the [GitHub update feed](https://github.com/Loyal-Blue/Haven/releases/latest/download/haven-updates.json). Open **More → Updates** to check now or edit the feed. With automatic updates enabled, Haven checks on launch and periodically while open.
 
-- **Android** downloads the APK, verifies the checksum, package ID and signing certificate, then asks you to open Android's installer. Android may ask once whether Haven can install updates. Keep the signing key consistent across releases.
-- **Linux** downloads and verifies the archive, keeps the previous version, and switches the packaged launcher to the new version on the next launch. The app profile remains in its existing data directory. A raw Flutter build can check for updates but needs the packaged launcher to install them.
-- **iOS** uses the normal Apple distribution process when released.
+- **Android** downloads the APK, checks its checksum and signing identity, and opens Android’s installer when you choose **Install update**.
+- **Linux** verifies and stages the update for the next launch when using the writable packaged launcher.
+- **Windows** verifies and downloads the ZIP. Select **Show downloaded ZIP**, extract it and launch Haven from the new folder.
+- **iOS** uses Apple distribution when a signed app is released.
 
-The GitHub Actions workflow publishes Android, Linux and `haven-updates.json` on a version tag such as `v0.4.0`. Set the secrets `HAVEN_RELEASE_KEYSTORE_BASE64`, `HAVEN_RELEASE_STORE_PASSWORD`, `HAVEN_RELEASE_KEY_ALIAS` and `HAVEN_RELEASE_KEY_PASSWORD` for a persistent Android release key. A release signed with a different key cannot replace the developer preview. Increase both the version and build number in `pubspec.yaml` for the next release. Tag builds preconfigure their repository’s public release feed. For self-hosting, generate the manifest with `python3 tool/release_manifest.py --help`, upload it and both packages to the chosen HTTPS host, then enter the manifest URL in the app.
+To publish, create a version tag matching the version in `pubspec.yaml` and increment its build number. GitHub Actions publishes the Android, Linux and Windows packages with a checksummed manifest. Keep the same Android signing key so existing installations can upgrade in place. The repository uses `HAVEN_RELEASE_KEYSTORE_BASE64`, `HAVEN_RELEASE_STORE_PASSWORD`, `HAVEN_RELEASE_KEY_ALIAS` and `HAVEN_RELEASE_KEY_PASSWORD` to sign tagged Android builds.
 
-## Project files
-
-- `lib/domain.dart` defines the save schema and the town economy.
-- `lib/store.dart` serializes app changes and commits a local snapshot before announcing success.
-- `lib/main.dart`, `lib/screens.dart`, `lib/town.dart` and `lib/editors.dart` implement the client.
-- `assets/world/` contains original pixel art. Regenerate it with `python3 tool/draw_world.py` and Pillow. Font licenses are under `assets/fonts/`.
-- [Architecture and roadmap](docs/architecture.md) covers the data model, sync and AI design, and acceptance criteria.
+The shared save and town logic are in `lib/domain.dart` and `lib/store.dart`. Original terrain artwork is in `assets/world/`. Font licensing is in `assets/fonts/`.

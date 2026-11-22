@@ -57,6 +57,8 @@ class UpdatesPanel extends StatelessWidget {
                 subtitle: Text(
                   updates.platform == 'android'
                       ? 'Download in the app. Android asks you to install.'
+                      : updates.isWindows
+                      ? 'Download verified ZIPs for manual installation.'
                       : updates.canInstall
                       ? 'Download now and apply on the next launch.'
                       : 'Check for new versions when Haven is open.',
@@ -87,7 +89,7 @@ class UpdatesPanel extends StatelessWidget {
                   child: Text(status, style: muted(context)),
                 ),
               ],
-              if (updates.available != null && !updates.canInstall)
+              if (updates.available != null && !updates.canDownload)
                 Text(
                   'Use the packaged Linux launcher for automatic installs.',
                   style: muted(context),
@@ -118,11 +120,17 @@ class UpdatesPanel extends StatelessWidget {
                     child: const Text('Check now'),
                   ),
                 if (updates.available != null &&
-                    updates.canInstall &&
-                    (updates.platform == 'android' || !updates.ready))
+                    updates.canDownload &&
+                    (updates.linux == null || !updates.ready))
                   FilledButton(
                     onPressed: updates.busy ? null : updates.install,
-                    child: const Text('Install update'),
+                    child: Text(
+                      updates.isWindows
+                          ? (updates.ready
+                                ? 'Show downloaded ZIP'
+                                : 'Download update')
+                          : 'Install update',
+                    ),
                   ),
               ],
             ),
@@ -144,18 +152,25 @@ class UpdateNotice extends StatelessWidget {
     builder: (context, _) {
       final release = updates.available;
       if (release == null || updates.busy) return const SizedBox.shrink();
-      final text = updates.ready && updates.platform != 'android'
+      final text = updates.ready && updates.linux != null
           ? 'Haven ${release.version} will open next launch'
           : 'Haven ${release.version} is available';
       return Material(
         color: Theme.of(context).colorScheme.primaryContainer,
+        textStyle: TextStyle(
+          color: Theme.of(context).colorScheme.onPrimaryContainer,
+        ),
         child: InkWell(
           onTap: openSettings,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
               children: [
-                const Icon(Icons.system_update_alt_outlined, size: 19),
+                Icon(
+                  Icons.system_update_alt_outlined,
+                  size: 19,
+                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                ),
                 const SizedBox(width: 9),
                 Expanded(
                   child: Text(
@@ -163,7 +178,11 @@ class UpdateNotice extends StatelessWidget {
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
-                const Icon(Icons.chevron_right, size: 18),
+                Icon(
+                  Icons.chevron_right,
+                  size: 18,
+                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                ),
               ],
             ),
           ),

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'design.dart';
 import 'domain.dart';
+import 'planner_data.dart';
 
 Future<T?> _edit<T>(
   BuildContext context,
@@ -126,13 +127,21 @@ Future<Task?> editTask(
   BuildContext context,
   String initialDay, [
   Task? existing,
+  List<Project> projects = const [],
+  String? selectedProject,
+  Repeat initialRepeat = Repeat.once,
 ]) {
   var title = existing?.title ?? '';
   var notes = existing?.notes ?? '';
   var due = existing?.due ?? initialDay;
   var effort = existing?.effort ?? Effort.steady;
   var category = existing?.category ?? TaskCategory.personal;
-  var repeat = existing?.repeat ?? Repeat.once;
+  var repeat = existing?.repeat ?? initialRepeat;
+  var interval = existing?.interval ?? 1;
+  var priority = existing?.priority ?? TaskPriority.normal;
+  var projectId = existing?.projectId ?? selectedProject ?? '';
+  var reminderMinute = existing?.reminderMinute;
+  if (!projects.any((project) => project.id == projectId)) projectId = '';
   return _edit(
     context,
     existing == null ? 'New task' : 'Edit task',
@@ -166,6 +175,60 @@ Future<Task?> editTask(
         (value) => value.label,
         existing != null ? null : (value) => refresh(() => repeat = value),
       ),
+      if (repeat != Repeat.once)
+        _choice(
+          repeat == Repeat.daily
+              ? 'Repeat every (days)'
+              : 'Repeat every (weeks)',
+          interval,
+          List.generate(99, (index) => index + 1),
+          (value) => '$value',
+          (value) => refresh(() => interval = value),
+        ),
+      _choice(
+        'Priority',
+        priority,
+        TaskPriority.values,
+        (value) => '${value.name[0].toUpperCase()}${value.name.substring(1)}',
+        (value) => refresh(() => priority = value),
+      ),
+      if (projects.isNotEmpty)
+        _choice(
+          'Project',
+          projectId,
+          ['', ...projects.map((item) => item.id)],
+          (id) => id.isEmpty
+              ? 'None'
+              : projects.firstWhere((item) => item.id == id).title,
+          (value) => refresh(() => projectId = value),
+        ),
+      OutlinedButton.icon(
+        icon: const Icon(Icons.notifications_outlined),
+        label: Text(
+          reminderMinute == null
+              ? 'Set reminder'
+              : 'Reminder · ${TimeOfDay(hour: reminderMinute! ~/ 60, minute: reminderMinute! % 60).format(context)}',
+        ),
+        onPressed: () async {
+          final time = await showTimePicker(
+            context: context,
+            initialTime: reminderMinute == null
+                ? const TimeOfDay(hour: 9, minute: 0)
+                : TimeOfDay(
+                    hour: reminderMinute! ~/ 60,
+                    minute: reminderMinute! % 60,
+                  ),
+          );
+          if (time != null && context.mounted) {
+            refresh(() => reminderMinute = time.hour * 60 + time.minute);
+          }
+        },
+      ),
+      if (reminderMinute != null)
+        TextButton(
+          onPressed: () => refresh(() => reminderMinute = null),
+          child: const Text('Remove reminder'),
+        ),
       _textField(
         'Notes',
         notes,
@@ -184,6 +247,10 @@ Future<Task?> editTask(
       effort: effort,
       repeat: repeat,
       notes: notes,
+      interval: interval,
+      priority: priority,
+      projectId: projectId.isEmpty ? null : projectId,
+      reminderMinute: reminderMinute,
     ),
   );
 }

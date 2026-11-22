@@ -1,37 +1,224 @@
+import 'dart:math' as math;
+
 import 'package:material_ui/material_ui.dart';
 
 import 'domain.dart';
+import 'theme_settings.dart';
 
-const graphite = Color(0xff292d2c);
-const railText = Color(0xffedf0ee);
-const silverMint = Color(0xffdde6e0);
+class HavenPalette extends ThemeExtension<HavenPalette> {
+  const HavenPalette(this.colors, this.monochrome, this.reducedMotion);
+  final Map<ThemeToken, Color> colors;
+  final bool monochrome, reducedMotion;
 
-ThemeData havenTheme(Brightness brightness) {
-  final dark = brightness == Brightness.dark;
-  final scheme = ColorScheme.fromSeed(
-    seedColor: const Color(0xff76837d),
-    brightness: brightness,
-    primary: dark ? const Color(0xffc9d8ce) : graphite,
-    onPrimary: dark ? const Color(0xff202924) : const Color(0xfff9fbfa),
-    primaryContainer: dark ? const Color(0xff485650) : silverMint,
-    onPrimaryContainer: dark
-        ? const Color(0xffeff4f0)
-        : const Color(0xff28332f),
-    surface: dark ? const Color(0xff252827) : const Color(0xffe0e3e1),
-    onSurface: dark ? const Color(0xffedf0ed) : const Color(0xff222624),
-    onSurfaceVariant: dark ? const Color(0xffbbc3bd) : const Color(0xff4b5650),
-    outline: dark ? const Color(0xff829089) : const Color(0xff76817b),
-    outlineVariant: dark ? const Color(0xff4a504d) : const Color(0xffcbd1cd),
-    error: dark ? const Color(0xfff1b7ad) : const Color(0xff943e39),
+  Color operator [](ThemeToken token) => colors[token]!;
+
+  @override
+  HavenPalette copyWith() => this;
+
+  @override
+  HavenPalette lerp(HavenPalette? other, double t) => other == null
+      ? this
+      : HavenPalette(
+          {
+            for (final token in ThemeToken.values)
+              token: Color.lerp(this[token], other[token], t)!,
+          },
+          other.monochrome,
+          other.reducedMotion,
+        );
+}
+
+HavenPalette palette(BuildContext context) =>
+    Theme.of(context).extension<HavenPalette>() ??
+    makePalette(Theme.of(context).brightness, const ThemeSettings());
+
+Color rgb(int value) => Color(0xff000000 | value);
+
+Color readableColor(
+  Color preferred,
+  Color background, {
+  double minRatio = 4.5,
+}) {
+  final luminance = background.computeLuminance();
+  bool passes(Color candidate) {
+    final l = candidate.computeLuminance();
+    return (math.max(l, luminance) + .05) / (math.min(l, luminance) + .05) >=
+        minRatio;
+  }
+
+  if (passes(preferred)) return preferred;
+  final endpoint = luminance > .179 ? Colors.black : Colors.white;
+  for (var i = 1; i < 10; i++) {
+    final candidate = Color.lerp(preferred, endpoint, i / 10)!;
+    if (passes(candidate)) return candidate;
+  }
+  return endpoint;
+}
+
+HavenPalette makePalette(Brightness brightness, ThemeSettings settings) {
+  final base = settings.preset == ThemePreset.custom
+      ? settings.base
+      : settings.preset;
+  final dark = brightness == Brightness.dark || base == ThemePreset.dark;
+  final mono = settings.mono;
+  if (mono != Mono.off) {
+    final black = mono == Mono.black;
+    final ink = black ? Colors.white : Colors.black;
+    final paper = black ? Colors.black : Colors.white;
+    return HavenPalette(
+      {
+        for (final token in ThemeToken.values)
+          token: switch (token) {
+            ThemeToken.background ||
+            ThemeToken.surface ||
+            ThemeToken.navigation => paper,
+            _ => ink,
+          },
+      },
+      true,
+      settings.reducedMotion,
+    );
+  }
+  final primary = rgb(base.primary);
+  final secondary = rgb(base.secondary);
+  final colors = {
+    ThemeToken.primary: dark && base != ThemePreset.dark
+        ? Color.lerp(primary, Colors.white, .44)!
+        : primary,
+    ThemeToken.secondary: dark && base != ThemePreset.dark
+        ? Color.lerp(secondary, Colors.white, .47)!
+        : secondary,
+    ThemeToken.background: dark && base != ThemePreset.dark
+        ? rgb(0x1e2422)
+        : rgb(base.background),
+    ThemeToken.surface: dark && base != ThemePreset.dark
+        ? rgb(0x292f2c)
+        : rgb(base.surface),
+    ThemeToken.text: dark ? rgb(0xf3f0e9) : rgb(0x23271f),
+    ThemeToken.navigation: dark ? rgb(0x303833) : rgb(0xf7f2e9),
+    ThemeToken.progress: dark ? rgb(0xa4cfa5) : primary,
+    ThemeToken.town: dark ? rgb(0x729a85) : rgb(0x83b9a5),
+    ThemeToken.todo: rgb(0xc3b1e2),
+    ThemeToken.routine: rgb(0xeaa6a6),
+    ThemeToken.event: rgb(0x96c7d1),
+    ThemeToken.my: rgb(0xead5a6),
+    ThemeToken.more: rgb(0xbdafd9),
+    if (settings.preset == ThemePreset.custom)
+      for (final entry in settings.colors.entries) entry.key: rgb(entry.value),
+  };
+  if (settings.highContrast) {
+    for (final token in [
+      ThemeToken.surface,
+      ThemeToken.background,
+      ThemeToken.navigation,
+    ]) {
+      var color = colors[token]!;
+      final luminance = color.computeLuminance();
+      if (luminance > .1 && luminance < .3) {
+        final pole = luminance < .179 ? Colors.black : Colors.white;
+        while (color.computeLuminance() > .1 && color.computeLuminance() < .3) {
+          color = Color.lerp(color, pole, .15)!;
+        }
+        colors[token] = color;
+      }
+    }
+  }
+  return HavenPalette(Map.unmodifiable(colors), false, settings.reducedMotion);
+}
+
+ThemeData havenTheme(
+  Brightness brightness, [
+  ThemeSettings settings = const ThemeSettings(),
+]) {
+  final tokens = makePalette(brightness, settings);
+  final mono = tokens.monochrome;
+  final background = tokens[ThemeToken.background];
+  final surface = tokens[ThemeToken.surface];
+  final contrast = settings.highContrast ? 7.0 : 4.5;
+  final ink = readableColor(
+    tokens[ThemeToken.text],
+    surface,
+    minRatio: contrast,
   );
-  return ThemeData(
+  final accent = readableColor(tokens[ThemeToken.primary], surface);
+  final secondary = readableColor(tokens[ThemeToken.secondary], surface);
+  final outline = readableColor(
+    ink,
+    surface,
+    minRatio: settings.highContrast ? 7 : 3,
+  );
+  final soft = Color.lerp(ink, surface, settings.highContrast ? .38 : .78)!;
+  final tinted = Color.lerp(surface, tokens[ThemeToken.primary], .18)!;
+  final scheme = ColorScheme.fromSeed(
+    seedColor: mono ? Colors.grey : accent,
+    brightness: brightness,
+    primary: accent,
+    onPrimary: readableColor(background, accent),
+    secondary: secondary,
+    onSecondary: readableColor(background, secondary),
+    primaryContainer: mono ? accent : tinted,
+    onPrimaryContainer: mono ? background : readableColor(ink, tinted),
+    secondaryContainer: surface,
+    onSecondaryContainer: ink,
+    tertiary: accent,
+    onTertiary: readableColor(background, accent),
+    tertiaryContainer: surface,
+    onTertiaryContainer: ink,
+    surface: surface,
+    onSurface: ink,
+    surfaceBright: surface,
+    surfaceDim: surface,
+    surfaceContainerLowest: surface,
+    surfaceContainerLow: surface,
+    surfaceContainer: surface,
+    surfaceContainerHigh: surface,
+    surfaceContainerHighest: mono ? surface : Color.lerp(surface, accent, .09),
+    onSurfaceVariant: readableColor(
+      Color.lerp(ink, surface, .22)!,
+      surface,
+      minRatio: contrast,
+    ),
+    outline: outline,
+    outlineVariant: soft,
+    error: mono ? ink : readableColor(rgb(0xb44344), surface),
+    onError: mono ? background : null,
+    errorContainer: mono ? surface : null,
+    onErrorContainer: mono ? ink : null,
+    inverseSurface: ink,
+    onInverseSurface: readableColor(background, ink),
+    inversePrimary: readableColor(background, ink),
+    surfaceTint: Colors.transparent,
+    primaryFixed: accent,
+    onPrimaryFixed: readableColor(background, accent),
+    secondaryFixed: mono ? ink : null,
+    secondaryFixedDim: mono ? ink : null,
+    tertiaryFixed: mono ? ink : null,
+    tertiaryFixedDim: mono ? ink : null,
+    primaryFixedDim: mono ? ink : null,
+    onPrimaryFixedVariant: mono ? background : null,
+    onSecondaryFixed: mono ? background : null,
+    onSecondaryFixedVariant: mono ? background : null,
+    onTertiaryFixed: mono ? background : null,
+    onTertiaryFixedVariant: mono ? background : null,
+  );
+  final canvasInk = readableColor(
+    tokens[ThemeToken.text],
+    background,
+    minRatio: contrast,
+  );
+  final base = ThemeData(
     colorScheme: scheme,
+    extensions: [tokens],
     fontFamily: 'DM Sans',
-    scaffoldBackgroundColor: scheme.surface,
-    dividerColor: scheme.outlineVariant,
+    scaffoldBackgroundColor: background,
+    dividerColor: soft,
+    progressIndicatorTheme: ProgressIndicatorThemeData(
+      color: readableColor(tokens[ThemeToken.progress], surface, minRatio: 3),
+      linearTrackColor: soft,
+    ),
     dialogTheme: DialogThemeData(
-      backgroundColor: dark ? const Color(0xff2f3431) : const Color(0xffeff1ef),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      backgroundColor: surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
@@ -51,12 +238,15 @@ ThemeData havenTheme(Brightness brightness) {
     ),
     snackBarTheme: const SnackBarThemeData(behavior: SnackBarBehavior.floating),
   );
+  return base.copyWith(
+    textTheme: base.textTheme.apply(
+      bodyColor: canvasInk,
+      displayColor: canvasInk,
+    ),
+  );
 }
 
-Color panelColor(BuildContext context) =>
-    Theme.of(context).brightness == Brightness.dark
-    ? const Color(0xff303532)
-    : const Color(0xfff1f3f1);
+Color panelColor(BuildContext context) => Theme.of(context).colorScheme.surface;
 
 TextStyle muted(BuildContext context, {double size = 13}) => TextStyle(
   color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -64,11 +254,14 @@ TextStyle muted(BuildContext context, {double size = 13}) => TextStyle(
 );
 
 TextStyle displayStyle(BuildContext context, {double size = 34}) => TextStyle(
+  fontFamily: 'Haven Serif',
   fontWeight: FontWeight.w600,
   height: 1.1,
   fontSize: size,
   letterSpacing: -.75,
-  color: Theme.of(context).colorScheme.onSurface,
+  color:
+      DefaultTextStyle.of(context).style.color ??
+      Theme.of(context).colorScheme.onSurface,
 );
 
 class Panel extends StatelessWidget {
@@ -83,25 +276,31 @@ class Panel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(17),
+      borderRadius: BorderRadius.circular(22),
       side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
     );
     return DecoratedBox(
       decoration: ShapeDecoration(
         shape: shape,
-        shadows: const [
-          BoxShadow(
-            color: Color(0x130e1511),
-            offset: Offset(0, 4),
-            blurRadius: 10,
-          ),
-        ],
+        shadows: palette(context).monochrome
+            ? const []
+            : [
+                BoxShadow(
+                  color: Theme.of(context).colorScheme.shadow
+                      .withValues(alpha: .07),
+                  offset: Offset(0, 4),
+                  blurRadius: 10,
+                ),
+              ],
       ),
       child: Material(
         color: panelColor(context),
         shape: shape,
         clipBehavior: Clip.antiAlias,
-        child: Padding(padding: padding, child: child),
+        child: DefaultTextStyle.merge(
+          style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+          child: Padding(padding: padding, child: child),
+        ),
       ),
     );
   }

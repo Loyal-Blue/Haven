@@ -1,12 +1,19 @@
+import 'dart:io';
+
 import 'package:material_ui/material_ui.dart';
 
 import 'actions.dart';
+import 'appearance.dart';
+import 'cloud_appearance.dart';
 import 'design.dart';
 import 'domain.dart';
+import 'planner_data.dart';
+import 'planning.dart';
+import 'reminders.dart';
 import 'update_widgets.dart';
 import 'updates.dart';
 
-enum _TaskMenu { edit, archive }
+enum _TaskMenu { edit, archive, calendar }
 
 class TaskRow extends StatelessWidget {
   const TaskRow(
@@ -28,11 +35,20 @@ class TaskRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final day = occurrence ?? today;
-    final done = state.completed(task, day);
+    final done = day == today
+        ? state.checked(task, day)
+        : state.completed(task, day);
     final subtitle = [
       if (done) 'Completed',
       task.category.label,
-      if (task.repeat != Repeat.once) task.repeat.label,
+      if (task.repeat != Repeat.once)
+        task.interval == 1
+            ? task.repeat.label
+            : 'Every ${task.interval} ${task.repeat == Repeat.daily ? 'days' : 'weeks'}',
+      if (task.priority == TaskPriority.high) 'High priority',
+      if (task.priority == TaskPriority.low) 'Low priority',
+      if (task.reminderMinute case final time?)
+        TimeOfDay(hour: time ~/ 60, minute: time % 60).format(context),
       if (!done && task.repeat == Repeat.once && task.due.compareTo(today) < 0)
         'Overdue',
       if (!done && task.due.compareTo(today) > 0)
@@ -89,11 +105,30 @@ class TaskRow extends StatelessWidget {
                     actions.changeTask(context, today, task);
                   case _TaskMenu.archive:
                     actions.archiveTask(context, task);
+                  case _TaskMenu.calendar:
+                    openSystemCalendar(task, occurrence ?? task.due).then((
+                      opened,
+                    ) {
+                      if (!opened && context.mounted) {
+                        showNotice(
+                          context,
+                          'No calendar app could open this task.',
+                        );
+                      }
+                    });
                 }
               },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: _TaskMenu.edit, child: Text('Edit task')),
-                PopupMenuItem(
+              itemBuilder: (_) => [
+                const PopupMenuItem(
+                  value: _TaskMenu.edit,
+                  child: Text('Edit task'),
+                ),
+                if (Platform.isAndroid)
+                  const PopupMenuItem(
+                    value: _TaskMenu.calendar,
+                    child: Text('Add to device calendar'),
+                  ),
+                const PopupMenuItem(
                   value: _TaskMenu.archive,
                   child: Text('Archive task'),
                 ),
@@ -151,10 +186,14 @@ class TasksScreen extends StatefulWidget {
     required this.state,
     required this.actions,
     required this.today,
+    this.routines = false,
+    this.onPhoto,
   });
   final HavenState state;
   final HavenActions actions;
   final String today;
+  final bool routines;
+  final VoidCallback? onPhoto;
 
   @override
   State<TasksScreen> createState() => _TasksScreenState();
@@ -174,27 +213,61 @@ class _TasksScreenState extends State<TasksScreen> {
             .where(
               (task) =>
                   !task.archived &&
-                  task.due.compareTo(today) > 0 &&
+                  (widget.routines || task.due.compareTo(today) > 0) &&
                   !state.completed(task, today),
             )
             .toList()
           ..sort((a, b) => a.due.compareTo(b.due)),
       _TaskFilter.completed => <Task>[],
     };
+    if (widget.routines) {
+      tasks.removeWhere((task) => task.repeat == Repeat.once);
+    }
     final completed = state.ledger
-        .where((entry) => entry.kind == LedgerKind.task)
+        .where(
+          (entry) =>
+              entry.kind == LedgerKind.task &&
+              (!widget.routines ||
+                  state.tasks.any(
+                    (task) =>
+                        task.id == entry.sourceId && task.repeat != Repeat.once,
+                  )),
+        )
         .toList()
         .reversed;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         PageIntro(
-          'Tasks',
-          'Plan chores, schoolwork and everything in between.',
-          action: FilledButton.icon(
-            onPressed: () => widget.actions.changeTask(context, today),
-            icon: const Icon(Icons.add),
-            label: const Text('New task'),
+          widget.routines ? 'Routines' : 'Tasks',
+          '',
+          action: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton.icon(
+                onPressed: () => widget.actions.changeTask(
+                  context,
+                  today,
+                  null,
+                  null,
+                  widget.routines ? Repeat.daily : Repeat.once,
+                ),
+                icon: const Icon(Icons.add),
+                label: const Text('New task'),
+              ),
+              if (!widget.routines && widget.onPhoto != null)
+                OutlinedButton.icon(
+                  onPressed: widget.onPhoto,
+                  icon: const Icon(Icons.photo_camera_outlined),
+                  label: const Text('Photo tasks'),
+                ),
+              OutlinedButton.icon(
+                onPressed: () => showResetSettings(context, widget.actions),
+                icon: const Icon(Icons.restart_alt),
+                label: const Text('Reset'),
+              ),
+            ],
           ),
         ),
         Wrap(
@@ -204,7 +277,8 @@ class _TasksScreenState extends State<TasksScreen> {
               ChoiceChip(
                 label: Text(switch (item) {
                   _TaskFilter.today => 'Today',
-                  _TaskFilter.upcoming => 'Upcoming',
+                  _TaskFilter.upcoming =>
+                    widget.routines ? 'All routines' : 'Upcoming',
                   _TaskFilter.completed => 'Completed',
                 }),
                 selected: filter == item,
@@ -275,6 +349,7 @@ class PlannerScreen extends StatefulWidget {
 
 class _PlannerScreenState extends State<PlannerScreen> {
   DateTime? picked;
+  bool showMonth = false;
 
   void select(DateTime day) => setState(() => picked = day);
 
@@ -294,110 +369,157 @@ class _PlannerScreenState extends State<PlannerScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         PageIntro(
-          'Planner',
-          'See what’s due across the week.',
+          'Calendar',
+          '',
           action: FilledButton.icon(
             onPressed: () => widget.actions.changeTask(context, day),
             icon: const Icon(Icons.add),
             label: const Text('Schedule task'),
           ),
         ),
-        Panel(
-          padding: const EdgeInsets.all(8),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  IconButton(
-                    tooltip: 'Previous week',
-                    icon: const Icon(Icons.chevron_left),
-                    onPressed: () => select(calendarDay(selected, -7)),
-                  ),
-                  Expanded(
-                    child: TextButton.icon(
-                      icon: const Icon(Icons.calendar_month_outlined, size: 20),
-                      label: Text(
-                        MaterialLocalizations.of(context)
-                            .formatMonthYear(selected),
-                      ),
-                      onPressed: () async {
-                        final value = await showDatePicker(
-                          context: context,
-                          initialDate: selected,
-                          firstDate: DateTime(2000),
-                          lastDate: DateTime(2100, 12, 31),
-                        );
-                        if (value != null && mounted) select(value);
-                      },
+        Wrap(
+          spacing: 8,
+          children: [
+            ChoiceChip(
+              label: const Text('Week'),
+              selected: !showMonth,
+              onSelected: (_) => setState(() => showMonth = false),
+            ),
+            ChoiceChip(
+              label: const Text('Month'),
+              selected: showMonth,
+              onSelected: (_) => setState(() => showMonth = true),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (showMonth)
+          Panel(
+            padding: EdgeInsets.zero,
+            child: CalendarDatePicker(
+              initialDate: selected,
+              firstDate: DateTime(2000),
+              lastDate: DateTime(2100, 12, 31),
+              currentDate: now,
+              onDateChanged: select,
+            ),
+          )
+        else
+          Panel(
+            padding: const EdgeInsets.all(8),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    IconButton(
+                      tooltip: 'Previous week',
+                      icon: const Icon(Icons.chevron_left),
+                      onPressed: () => select(calendarDay(selected, -7)),
                     ),
-                  ),
-                  IconButton(
-                    tooltip: 'Next week',
-                    icon: const Icon(Icons.chevron_right),
-                    onPressed: () => select(calendarDay(selected, 7)),
-                  ),
-                ],
-              ),
-              Row(
-                children: [
-                  for (var i = 0; i < 7; i++)
                     Expanded(
-                      child: Builder(
-                        builder: (context) {
-                          final date = calendarDay(monday, i);
-                          final key = dayKey(date);
-                          final active = key == day;
-                          return Semantics(
-                            selected: active,
-                            button: true,
-                            label: formattedDate(context, key),
-                            child: InkWell(
-                              onTap: () => select(date),
-                              borderRadius: BorderRadius.circular(12),
-                              child: ExcludeSemantics(
-                                child: Container(
-                                  margin: const EdgeInsets.all(1),
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 8,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: active
-                                        ? scheme.primaryContainer
-                                        : null,
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Column(
-                                    children: [
-                                      Text(
-                                        labels[date.weekday % 7],
-                                        style: muted(context, size: 12),
-                                      ),
-                                      Text(
-                                        '${date.day}',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
+                      child: TextButton.icon(
+                        icon: const Icon(
+                          Icons.calendar_month_outlined,
+                          size: 20,
+                        ),
+                        label: Text(
+                          MaterialLocalizations.of(context)
+                              .formatMonthYear(selected),
+                        ),
+                        onPressed: () async {
+                          final value = await showDatePicker(
+                            context: context,
+                            initialDate: selected,
+                            firstDate: DateTime(2000),
+                            lastDate: DateTime(2100, 12, 31),
                           );
+                          if (value != null && mounted) select(value);
                         },
                       ),
                     ),
-                ],
-              ),
-            ],
+                    IconButton(
+                      tooltip: 'Next week',
+                      icon: const Icon(Icons.chevron_right),
+                      onPressed: () => select(calendarDay(selected, 7)),
+                    ),
+                  ],
+                ),
+                Row(
+                  children: [
+                    for (var i = 0; i < 7; i++)
+                      Expanded(
+                        child: Builder(
+                          builder: (context) {
+                            final date = calendarDay(monday, i);
+                            final key = dayKey(date);
+                            final active = key == day;
+                            return Semantics(
+                              selected: active,
+                              button: true,
+                              label: formattedDate(context, key),
+                              child: InkWell(
+                                onTap: () => select(date),
+                                borderRadius: BorderRadius.circular(12),
+                                child: ExcludeSemantics(
+                                  child: Container(
+                                    margin: const EdgeInsets.all(1),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 8,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: active
+                                          ? scheme.primaryContainer
+                                          : null,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        Text(
+                                          labels[date.weekday % 7],
+                                          style: muted(context, size: 12)
+                                              .copyWith(
+                                                color: active
+                                                    ? scheme.onPrimaryContainer
+                                                    : null,
+                                              ),
+                                        ),
+                                        Text(
+                                          '${date.day}',
+                                          style: TextStyle(
+                                            color: active
+                                                ? scheme.onPrimaryContainer
+                                                : null,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
         const SizedBox(height: 19),
         Text(
           day == widget.today ? 'Today' : formattedDate(context, day),
           style: displayStyle(context, size: 24),
         ),
         const SizedBox(height: 10),
+        for (final project in widget.state.projects.where(
+          (item) => item.milestone == day,
+        ))
+          ListTile(
+            leading: const Icon(Icons.flag_outlined),
+            title: Text(project.title),
+            subtitle: const Text('Project milestone'),
+          ),
         if (tasks.isEmpty)
           const EmptyPanel(
             'Nothing scheduled',
@@ -699,11 +821,13 @@ class MoreScreen extends StatelessWidget {
     required this.actions,
     required this.today,
     this.updates,
+    this.cloud,
   });
   final HavenState state;
   final HavenActions actions;
   final String today;
   final UpdateController? updates;
+  final AppearanceCloud? cloud;
 
   @override
   Widget build(BuildContext context) {
@@ -714,6 +838,57 @@ class MoreScreen extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        const SizedBox(height: 20),
+        Text('Settings', style: displayStyle(context, size: 28)),
+        const SizedBox(height: 10),
+        Panel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.edit_location_alt_outlined),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Town name'),
+                subtitle: Text(state.townName),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => actions.rename(context, state.townName),
+              ),
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.dark_mode_outlined),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Appearance'),
+                subtitle: Text(
+                  state.appearance.mono.name == 'off'
+                      ? state.appearance.preset.label
+                      : 'Black & White',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => AppearanceScreen(actions: actions),
+                  ),
+                ),
+              ),
+              const Divider(),
+              const ListTile(
+                leading: Icon(Icons.phone_android_outlined),
+                contentPadding: EdgeInsets.zero,
+                title: Text('Local save'),
+                subtitle: Text('Progress is stored on this device.'),
+              ),
+            ],
+          ),
+        ),
+        if (cloud case final controller?) ...[
+          const SizedBox(height: 12),
+          _CloudPanel(controller),
+        ],
+        if (updates case final controller?) ...[
+          const SizedBox(height: 12),
+          UpdatesPanel(controller),
+        ],
+        const SizedBox(height: 22),
         PageIntro(
           'Hobbies',
           'Track practice and set weekly goals.',
@@ -820,68 +995,58 @@ class MoreScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
         ],
-        const SizedBox(height: 20),
-        Text('Settings', style: displayStyle(context, size: 28)),
-        const SizedBox(height: 10),
-        Panel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.edit_location_alt_outlined),
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Town name'),
-                subtitle: Text(state.townName),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => actions.rename(context, state.townName),
-              ),
-              const Divider(),
-              ListTile(
-                leading: const Icon(Icons.dark_mode_outlined),
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Appearance'),
-                subtitle: Text(switch (state.theme) {
-                  ThemePreference.system => 'System theme',
-                  ThemePreference.light => 'Light theme',
-                  ThemePreference.dark => 'Dark theme',
-                }),
-                trailing: PopupMenuButton<ThemePreference>(
-                  tooltip: 'Choose appearance',
-                  onSelected: (theme) => actions.run(
-                    context,
-                    (current) => current.copyWith(theme: theme),
-                  ),
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(
-                      value: ThemePreference.system,
-                      child: Text('System'),
-                    ),
-                    PopupMenuItem(
-                      value: ThemePreference.light,
-                      child: Text('Light'),
-                    ),
-                    PopupMenuItem(
-                      value: ThemePreference.dark,
-                      child: Text('Dark'),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(),
-              const ListTile(
-                leading: Icon(Icons.phone_android_outlined),
-                contentPadding: EdgeInsets.zero,
-                title: Text('Local save'),
-                subtitle: Text('Progress is stored on this device.'),
-              ),
-            ],
-          ),
-        ),
-        if (updates case final controller?) ...[
-          const SizedBox(height: 12),
-          UpdatesPanel(controller),
-        ],
       ],
     );
   }
+}
+
+class _CloudPanel extends StatelessWidget {
+  const _CloudPanel(this.cloud);
+  final AppearanceCloud cloud;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: cloud,
+    builder: (context, _) => Panel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Appearance sync', style: displayStyle(context, size: 22)),
+          const SizedBox(height: 6),
+          Text(
+            cloud.email ??
+                (cloud.supported
+                    ? (cloud.configured
+                          ? 'Sign in to sync appearance preferences.'
+                          : 'Google sign-in needs a Firebase configuration.')
+                    : 'Google sign-in is available on configured Android and iOS builds.'),
+          ),
+          if (cloud.status case final status?) ...[
+            const SizedBox(height: 4),
+            Text(status, style: muted(context)),
+          ],
+          if (cloud.connected)
+            Wrap(
+              spacing: 8,
+              children: [
+                TextButton(
+                  onPressed: cloud.busy ? null : cloud.sync,
+                  child: const Text('Sync now'),
+                ),
+                TextButton(
+                  onPressed: cloud.busy ? null : cloud.signOut,
+                  child: const Text('Sign out'),
+                ),
+              ],
+            )
+          else if (cloud.configured && cloud.supported)
+            OutlinedButton.icon(
+              onPressed: cloud.busy ? null : cloud.signIn,
+              icon: const Icon(Icons.account_circle_outlined),
+              label: const Text('Sign in with Google'),
+            ),
+        ],
+      ),
+    ),
+  );
 }

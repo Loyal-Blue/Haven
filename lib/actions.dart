@@ -4,6 +4,7 @@ import 'design.dart';
 import 'domain.dart';
 import 'editors.dart';
 import 'store.dart';
+import 'reminders.dart';
 
 class HavenActions {
   const HavenActions(this.store);
@@ -36,10 +37,19 @@ class HavenActions {
     BuildContext context,
     String day, [
     Task? task,
+    String? projectId,
+    Repeat initialRepeat = Repeat.once,
   ]) async {
-    final edited = await editTask(context, day, task);
+    final edited = await editTask(
+      context,
+      day,
+      task,
+      store.state.projects,
+      projectId,
+      initialRepeat,
+    );
     if (edited == null || !context.mounted) return;
-    await run(
+    final saved = await run(
       context,
       (state) => state.copyWith(
         tasks: [
@@ -49,13 +59,18 @@ class HavenActions {
         ],
       ),
     );
+    if (saved != null &&
+        edited.reminderMinute != null &&
+        edited.reminderMinute != task?.reminderMinute) {
+      await TaskReminders().sync(saved, DateTime.now(), askPermission: true);
+    }
   }
 
   Future<void> finishTask(BuildContext context, Task task) async {
     final now = DateTime.now();
     var completed = false;
     final result = await run(context, (state) {
-      final next = completeTask(state, task.id, now);
+      final next = completeTask(advanceTownExpansion(state, now), task.id, now);
       completed = !identical(state, next);
       return next;
     });

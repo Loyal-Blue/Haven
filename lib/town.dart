@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 
 import 'design.dart';
 import 'domain.dart';
+import 'theme_settings.dart';
 
 const worldWidth = 320.0;
 const worldHeight = 304.0;
@@ -132,7 +133,7 @@ class _TownMapState extends State<TownMap> {
     child: SizedBox(
       width: double.infinity,
       child: AspectRatio(
-        aspectRatio: widget.wide ? 1.47 : worldWidth / worldHeight,
+        aspectRatio: widget.wide ? 1.58 : 1.1,
         child: LayoutBuilder(
           builder: (context, constraints) {
             final viewport = constraints.biggest;
@@ -175,79 +176,115 @@ class _TownMapState extends State<TownMap> {
               );
             }
 
+            final colors = palette(context);
+            final ink = colors[ThemeToken.text];
+            final surface = colors[ThemeToken.surface];
+            final titleInk = readableColor(ink, surface);
             return Stack(
               fit: StackFit.expand,
               children: [
                 ColoredBox(
-                  color: const Color(0xff414a38),
-                  child: InteractiveViewer(
-                    transformationController: camera,
-                    maxScale: 3,
-                    trackpadScrollCausesScale: true,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        Positioned(
-                          left: offset.dx,
-                          top: offset.dy,
-                          width: worldWidth * scale,
-                          height: worldHeight * scale,
-                          child: Image.asset(
-                            'assets/world/${terrain.image}.png',
-                            fit: BoxFit.fill,
-                            filterQuality: FilterQuality.none,
-                            excludeFromSemantics: true,
+                  color: colors[ThemeToken.town],
+                  child: ColorFiltered(
+                    colorFilter: colors.monochrome
+                        ? const ColorFilter.matrix([
+                            .2126,
+                            .7152,
+                            .0722,
+                            0,
+                            0,
+                            .2126,
+                            .7152,
+                            .0722,
+                            0,
+                            0,
+                            .2126,
+                            .7152,
+                            .0722,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            1,
+                            0,
+                          ])
+                        : ColorFilter.mode(
+                            colors[ThemeToken.town].withValues(alpha: .16),
+                            BlendMode.srcATop,
                           ),
-                        ),
-                        for (final building in objects) sprite(building),
-                      ],
-                    ),
-                  ),
-                ),
-                const Positioned.fill(
-                  child: IgnorePointer(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Color(0xad232923),
-                            Color(0x00232923),
-                            Color(0x00151f10),
-                          ],
-                          stops: [0, .43, 1],
-                        ),
+                    child: InteractiveViewer(
+                      transformationController: camera,
+                      maxScale: 3,
+                      trackpadScrollCausesScale: true,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          Positioned(
+                            left: offset.dx,
+                            top: offset.dy,
+                            width: worldWidth * scale,
+                            height: worldHeight * scale,
+                            child: Image.asset(
+                              'assets/world/${terrain.image}.png',
+                              fit: BoxFit.fill,
+                              filterQuality: FilterQuality.none,
+                              excludeFromSemantics: true,
+                            ),
+                          ),
+                          for (final building in objects) sprite(building),
+                        ],
                       ),
                     ),
                   ),
                 ),
                 Positioned(
-                  left: 17,
-                  top: 15,
-                  right: 62,
+                  left: 11,
+                  top: 10,
+                  right: 53,
                   child: IgnorePointer(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: displayStyle(
-                            context,
-                            size: 34,
-                          ).copyWith(color: const Color(0xfff3f3ec)),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '${terrain.name} · Level ${widget.level}',
-                          style: const TextStyle(
-                            color: Color(0xfff3f3ec),
-                            fontWeight: FontWeight.w700,
+                    child: Align(
+                      alignment: Alignment.topLeft,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: colors.monochrome
+                              ? surface
+                              : surface.withValues(alpha: .96),
+                          borderRadius: BorderRadius.circular(15),
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.outlineVariant,
                           ),
                         ),
-                      ],
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                widget.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: displayStyle(
+                                  context,
+                                  size: widget.wide ? 31 : 24,
+                                ).copyWith(color: titleInk),
+                              ),
+                              Text(
+                                '${terrain.name} · Level ${widget.level}',
+                                style: TextStyle(
+                                  color: titleInk,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -287,13 +324,13 @@ class _MapButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Material(
-    color: const Color(0xed252827),
+    color: panelColor(context),
     borderRadius: BorderRadius.circular(11),
     child: IconButton(
       onPressed: onPressed,
       tooltip: label,
       constraints: const BoxConstraints.tightFor(width: 48, height: 48),
-      color: const Color(0xfff2f4f2),
+      color: Theme.of(context).colorScheme.onSurface,
       icon: Icon(icon, size: 20),
     ),
   );

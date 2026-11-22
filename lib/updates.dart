@@ -355,7 +355,9 @@ class UpdateController extends ChangeNotifier {
   String? status;
   DateTime? _lastChecked;
 
+  bool get isWindows => platform == 'windows-x64';
   bool get canInstall => platform == 'android' || linux != null;
+  bool get canDownload => canInstall || isWindows;
 
   static Future<UpdateController?> load(
     Directory support,
@@ -368,8 +370,9 @@ class UpdateController extends ChangeNotifier {
       info =
           await _platformUpdates.invokeMapMethod<String, dynamic>('version') ??
           {};
-    } else if (Platform.isLinux && Abi.current() == Abi.linuxX64) {
-      platform = 'linux-x64';
+    } else if ((Platform.isLinux && Abi.current() == Abi.linuxX64) ||
+        (Platform.isWindows && Abi.current() == Abi.windowsX64)) {
+      platform = Platform.isWindows ? 'windows-x64' : 'linux-x64';
       info = jsonDecode(
         await rootBundle.loadString('version.json'),
       ) as Map<String, dynamic>;
@@ -447,13 +450,13 @@ class UpdateController extends ChangeNotifier {
       if (available?.sha256 != release.sha256) ready = false;
       available = release;
       status = 'Haven ${release.version} is available.';
-      if (automatic && canInstall && !ready) await _prepare(release);
+      if (automatic && canDownload && !ready) await _prepare(release);
     });
   }
 
   Future<void> install() async {
     final release = available;
-    if (busy || release == null || !canInstall) return;
+    if (busy || release == null || !canDownload) return;
     await _run('Preparing update…', () async {
       if (!ready || platform == 'android') await _prepare(release);
       if (platform == 'android') {
@@ -464,12 +467,21 @@ class UpdateController extends ChangeNotifier {
         status = opened == true
             ? 'Confirm the update in the Android installer.'
             : 'Allow installs from Haven in Android Settings, then tap Install update again.';
+      } else if (isWindows) {
+        final file = File('${cache.path}/${_filename(release)}').absolute;
+        await Process.start('explorer.exe', ['/select,${file.path}']);
+        status =
+            'Extract the verified ZIP, then start Haven from the new folder.';
       }
     });
   }
 
   String _filename(UpdateRelease release) =>
-      'haven-${release.build}.${platform == 'android' ? 'apk' : 'tar.gz'}';
+      'haven-${release.build}.${switch (platform) {
+        'android' => 'apk',
+        'windows-x64' => 'zip',
+        _ => 'tar.gz',
+      }}';
 
   Future<void> _prepare(UpdateRelease release) async {
     status = 'Downloading Haven ${release.version}…';
@@ -484,9 +496,13 @@ class UpdateController extends ChangeNotifier {
       await target.stage(artifact, release);
     }
     ready = true;
-    status = platform == 'android'
-        ? 'Haven ${release.version} is downloaded and ready to install.'
-        : 'Haven ${release.version} will open the next time you launch Haven.';
+    status = switch (platform) {
+      'android' =>
+        'Haven ${release.version} is downloaded and ready to install.',
+      'windows-x64' =>
+        'The Haven ${release.version} ZIP is downloaded and verified.',
+      _ => 'Haven ${release.version} will open the next time you launch Haven.',
+    };
   }
 
   Future<void> _run(String progress, Future<void> Function() action) async {
