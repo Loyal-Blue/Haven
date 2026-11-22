@@ -1,0 +1,117 @@
+name: Build Haven
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-35' 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.50.1'
+      - run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed lib test
+      - run: flutter analyze
+      - run: flutter test
+      - name: Build Android APK
+        env:
+          HAVEN_KEYSTORE_BASE64: ${{ secrets.HAVEN_RELEASE_KEYSTORE_BASE64 }}
+          HAVEN_RELEASE_STORE_PASSWORD: ${{ secrets.HAVEN_RELEASE_STORE_PASSWORD }}
+          HAVEN_RELEASE_KEY_ALIAS: ${{ secrets.HAVEN_RELEASE_KEY_ALIAS }}
+          HAVEN_RELEASE_KEY_PASSWORD: ${{ secrets.HAVEN_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          options=()
+          if [[ "$GITHUB_REF_TYPE" == 'tag' ]]; then
+            : "${HAVEN_KEYSTORE_BASE64:?Missing release keystore}"
+            : "${HAVEN_RELEASE_STORE_PASSWORD:?Missing release store password}"
+            : "${HAVEN_RELEASE_KEY_ALIAS:?Missing release key alias}"
+            : "${HAVEN_RELEASE_KEY_PASSWORD:?Missing release key password}"
+            export HAVEN_RELEASE_KEYSTORE="$RUNNER_TEMP/haven-release.jks"
+            trap 'rm -f -- "$HAVEN_RELEASE_KEYSTORE"' EXIT
+            (umask 077; printf '%s' "$HAVEN_KEYSTORE_BASE64" | base64 --decode > "$HAVEN_RELEASE_KEYSTORE")
+            options+=("--dart-define=HAVEN_UPDATE_FEED=https://github.com/$GITHUB_REPOSITORY/releases/latest/download/haven-updates.json")
+          fi
+          flutter build apk --release "${options[@]}"
+          cp build/app/outputs/flutter-apk/app-release.apk Haven-Android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: haven-android
+          path: Haven-Android.apk
+
+  linux:
+    needs: android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.50.1'
+      - run: flutter pub get
+      - name: Build Linux bundle
+        run: |
+          options=()
+          if [[ "$GITHUB_REF_TYPE" == 'tag' ]]; then
+            options+=("--dart-define=HAVEN_UPDATE_FEED=https://github.com/$GITHUB_REPOSITORY/releases/latest/download/haven-updates.json")
+          fi
+          flutter build linux --release "${options[@]}"
+          tool/package_linux.sh build/linux/x64/release/bundle Haven-Linux-x86_64.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: haven-linux
+          path: Haven-Linux-x86_64.tar.gz
+
+  ios:
+    needs: linux
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.50.1'
+      - run: flutter pub get
+      - run: flutter build ios --release --no-codesign
+
+  publish:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [android, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: haven-android
+      - uses: actions/download-artifact@v4
+        with:
+          name: haven-linux
+      - name: Publish Android and Linux release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 tool/release_manifest.py --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME" \
+            --tag "$GITHUB_REF_NAME" --android Haven-Android.apk --linux Haven-Linux-x86_64.tar.gz
+          if [[ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null || true)" == true ]]; then
+            gh release upload "$GITHUB_REF_NAME" Haven-Android.apk Haven-Linux-x86_64.tar.gz haven-updates.json
+            gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+          else
+            gh release create "$GITHUB_REF_NAME" Haven-Android.apk Haven-Linux-x86_64.tar.gz haven-updates.json \
+              --verify-tag --latest --generate-notes
+          fi
