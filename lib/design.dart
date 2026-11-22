@@ -248,10 +248,8 @@ ThemeData havenTheme(
 
 Color panelColor(BuildContext context) => Theme.of(context).colorScheme.surface;
 
-TextStyle muted(BuildContext context, {double size = 13}) => TextStyle(
-  color: Theme.of(context).colorScheme.onSurfaceVariant,
-  fontSize: size,
-);
+TextStyle muted(BuildContext context, {double size = 13}) =>
+    TextStyle(fontSize: size, fontWeight: FontWeight.w400);
 
 TextStyle displayStyle(BuildContext context, {double size = 34}) => TextStyle(
   fontFamily: 'Haven Serif',

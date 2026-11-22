@@ -233,7 +233,6 @@ class _HavenShellState extends State<HavenShell> with WidgetsBindingObserver {
     refreshReminders();
     dateTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       refreshDay();
-      unawaited(cloud.sync());
       unawaited(widget.updates?.check());
     });
     WidgetsBinding.instance.addObserver(this);
@@ -250,11 +249,12 @@ class _HavenShellState extends State<HavenShell> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  void refreshReminders() {
+  void refreshReminders({bool scheduleNative = true}) {
     final now = DateTime.now();
     final state = widget.store.state;
-    unawaited(reminders.sync(state, now));
-    if (!TaskReminders.native) {
+    if (TaskReminders.native) {
+      if (scheduleNative) unawaited(reminders.sync(state, now));
+    } else {
       final day = dayKey(now);
       if (day != today) shownReminders.clear();
       final minute = now.hour * 60 + now.minute;
@@ -277,8 +277,8 @@ class _HavenShellState extends State<HavenShell> with WidgetsBindingObserver {
 
   void refreshDay() {
     final now = DateTime.now();
-    refreshReminders();
     final date = dayKey(now);
+    refreshReminders(scheduleNative: today != date);
     if (today != date && mounted) setState(() => today = date);
     final expansion = widget.store.state.expansion;
     if (expansion == null ||
@@ -306,6 +306,7 @@ class _HavenShellState extends State<HavenShell> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       refreshDay();
+      unawaited(cloud.sync());
       unawaited(widget.updates?.check());
     }
   }

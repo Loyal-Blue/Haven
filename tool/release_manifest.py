@@ -6,6 +6,7 @@ import json
 import re
 from pathlib import Path
 from urllib.parse import quote, urlparse
+from zipfile import BadZipFile, ZipFile
 
 
 def main():
@@ -32,6 +33,13 @@ def main():
     artifacts = {}
     packages = [("android", args.android), ("linux-x64", args.linux)]
     if args.windows is not None:
+        try:
+            with ZipFile(args.windows) as archive:
+                metadata = json.loads(archive.read("data/flutter_assets/version.json"))
+            if metadata["version"] != version or str(metadata["build_number"]) != build:
+                parser.error("Windows update metadata does not match pubspec.yaml")
+        except (BadZipFile, OSError, KeyError, TypeError, ValueError):
+            parser.error("Windows ZIP is missing valid app update metadata")
         packages.append(("windows-x64", args.windows))
     for platform, path in packages:
         length = path.stat().st_size
