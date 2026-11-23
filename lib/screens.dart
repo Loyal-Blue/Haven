@@ -7,6 +7,8 @@ import 'appearance.dart';
 import 'cloud_appearance.dart';
 import 'design.dart';
 import 'domain.dart';
+import 'mobile_preferences.dart';
+import 'mobile_widgets.dart';
 import 'planner_data.dart';
 import 'planning.dart';
 import 'reminders.dart';
@@ -65,11 +67,13 @@ class TaskRow extends StatelessWidget {
             onPressed: done || !canComplete
                 ? null
                 : () => actions.finishTask(context, task),
-            icon: Icon(
-              done ? Icons.check_circle : Icons.radio_button_unchecked,
-              color: done ? Theme.of(context).colorScheme.primary : null,
-              size: 23,
-            ),
+            icon: phoneStyle(context) != null
+                ? PhoneCheck(done: done, category: task.category)
+                : Icon(
+                    done ? Icons.check_circle : Icons.radio_button_unchecked,
+                    color: done ? Theme.of(context).colorScheme.primary : null,
+                    size: 23,
+                  ),
           ),
           Expanded(
             child: InkWell(
@@ -338,10 +342,14 @@ class PlannerScreen extends StatefulWidget {
     required this.state,
     required this.actions,
     required this.today,
+    this.initialDay,
+    this.onDateSelected,
   });
   final HavenState state;
   final HavenActions actions;
   final String today;
+  final String? initialDay;
+  final ValueChanged<String>? onDateSelected;
 
   @override
   State<PlannerScreen> createState() => _PlannerScreenState();
@@ -351,12 +359,15 @@ class _PlannerScreenState extends State<PlannerScreen> {
   DateTime? picked;
   bool showMonth = false;
 
-  void select(DateTime day) => setState(() => picked = day);
+  void select(DateTime day) {
+    setState(() => picked = day);
+    widget.onDateSelected?.call(dayKey(day));
+  }
 
   @override
   Widget build(BuildContext context) {
     final now = dateFromKey(widget.today);
-    final selected = picked ?? now;
+    final selected = picked ?? dateFromKey(widget.initialDay ?? widget.today);
     final day = dayKey(selected);
     final monday = calendarDay(selected, 1 - selected.weekday);
     final tasks = widget.state.tasksFor(
@@ -444,65 +455,74 @@ class _PlannerScreenState extends State<PlannerScreen> {
                     ),
                   ],
                 ),
-                Row(
-                  children: [
-                    for (var i = 0; i < 7; i++)
-                      Expanded(
-                        child: Builder(
-                          builder: (context) {
-                            final date = calendarDay(monday, i);
-                            final key = dayKey(date);
-                            final active = key == day;
-                            return Semantics(
-                              selected: active,
-                              button: true,
-                              label: formattedDate(context, key),
-                              child: InkWell(
-                                onTap: () => select(date),
-                                borderRadius: BorderRadius.circular(12),
-                                child: ExcludeSemantics(
-                                  child: Container(
-                                    margin: const EdgeInsets.all(1),
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 8,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: active
-                                          ? scheme.primaryContainer
-                                          : null,
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Column(
-                                      children: [
-                                        Text(
-                                          labels[date.weekday % 7],
-                                          style: muted(context, size: 12)
-                                              .copyWith(
-                                                color: active
-                                                    ? scheme.onPrimaryContainer
-                                                    : null,
-                                              ),
-                                        ),
-                                        Text(
-                                          '${date.day}',
-                                          style: TextStyle(
-                                            color: active
-                                                ? scheme.onPrimaryContainer
-                                                : null,
-                                            fontWeight: FontWeight.w800,
+                if (phoneStyle(context) != null)
+                  PhoneWeek(
+                    week: monday,
+                    selected: day,
+                    today: widget.today,
+                    onSelect: (value) => select(dateFromKey(value)),
+                  )
+                else
+                  Row(
+                    children: [
+                      for (var i = 0; i < 7; i++)
+                        Expanded(
+                          child: Builder(
+                            builder: (context) {
+                              final date = calendarDay(monday, i);
+                              final key = dayKey(date);
+                              final active = key == day;
+                              return Semantics(
+                                selected: active,
+                                button: true,
+                                label: formattedDate(context, key),
+                                child: InkWell(
+                                  onTap: () => select(date),
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: ExcludeSemantics(
+                                    child: Container(
+                                      margin: const EdgeInsets.all(1),
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 8,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: active
+                                            ? scheme.primaryContainer
+                                            : null,
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Column(
+                                        children: [
+                                          Text(
+                                            labels[date.weekday % 7],
+                                            style: muted(context, size: 12)
+                                                .copyWith(
+                                                  color: active
+                                                      ? scheme
+                                                            .onPrimaryContainer
+                                                      : null,
+                                                ),
                                           ),
-                                        ),
-                                      ],
+                                          Text(
+                                            '${date.day}',
+                                            style: TextStyle(
+                                              color: active
+                                                  ? scheme.onPrimaryContainer
+                                                  : null,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
-                              ),
-                            );
-                          },
+                              );
+                            },
+                          ),
                         ),
-                      ),
-                  ],
-                ),
+                    ],
+                  ),
               ],
             ),
           ),
@@ -694,7 +714,24 @@ class _MoneyScreenState extends State<MoneyScreen> {
                   ),
                 ],
               ),
-              if (budget > 0) ...[
+              if (budget > 0 && phoneStyle(context) != null) ...[
+                Text('${euro(expense)} of ${euro(budget)} spent'),
+                const SizedBox(height: 10),
+                PhonePills(
+                  metrics: [
+                    (
+                      label: 'Spent',
+                      fraction: (expense / budget).clamp(0.0, 1.0),
+                      card: DashboardCard.money,
+                    ),
+                    (
+                      label: 'Remaining',
+                      fraction: (1 - expense / budget).clamp(0.0, 1.0),
+                      card: DashboardCard.hobbies,
+                    ),
+                  ],
+                ),
+              ] else if (budget > 0) ...[
                 Text(
                   '${euro(expense)} of ${euro(budget)} spent',
                   style: muted(context),
@@ -822,12 +859,15 @@ class MoreScreen extends StatelessWidget {
     required this.today,
     this.updates,
     this.cloud,
+    this.showSettings = true,
+    this.showHobbies = true,
   });
   final HavenState state;
   final HavenActions actions;
   final String today;
   final UpdateController? updates;
   final AppearanceCloud? cloud;
+  final bool showSettings, showHobbies;
 
   @override
   Widget build(BuildContext context) {
@@ -838,162 +878,188 @@ class MoreScreen extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SizedBox(height: 20),
-        Text('Settings', style: displayStyle(context, size: 28)),
-        const SizedBox(height: 10),
-        Panel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.edit_location_alt_outlined),
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Town name'),
-                subtitle: Text(state.townName),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => actions.rename(context, state.townName),
-              ),
-              const Divider(),
-              ListTile(
-                leading: const Icon(Icons.dark_mode_outlined),
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Appearance'),
-                subtitle: Text(
-                  state.appearance.mono.name == 'off'
-                      ? state.appearance.preset.label
-                      : 'Black & White',
+        if (showSettings) ...[
+          const SizedBox(height: 20),
+          Text('Settings', style: displayStyle(context, size: 28)),
+          const SizedBox(height: 10),
+          Panel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.edit_location_alt_outlined),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Town name'),
+                  subtitle: Text(state.townName),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => actions.rename(context, state.townName),
                 ),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => AppearanceScreen(actions: actions),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.dark_mode_outlined),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Appearance'),
+                  subtitle: Text(
+                    state.appearance.mono.name == 'off'
+                        ? state.appearance.preset.label
+                        : 'Black & White',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => AppearanceScreen(actions: actions),
+                    ),
                   ),
                 ),
-              ),
-              const Divider(),
-              const ListTile(
-                leading: Icon(Icons.phone_android_outlined),
-                contentPadding: EdgeInsets.zero,
-                title: Text('Local save'),
-                subtitle: Text('Progress is stored on this device.'),
-              ),
-            ],
+                const Divider(),
+                const ListTile(
+                  leading: Icon(Icons.phone_android_outlined),
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('Local save'),
+                  subtitle: Text('Progress is stored on this device.'),
+                ),
+              ],
+            ),
           ),
-        ),
-        if (cloud case final controller?) ...[
-          const SizedBox(height: 12),
-          _CloudPanel(controller),
+          if (cloud case final controller?) ...[
+            const SizedBox(height: 12),
+            _CloudPanel(controller),
+          ],
+          if (updates case final controller?) ...[
+            const SizedBox(height: 12),
+            UpdatesPanel(controller),
+          ],
+          const SizedBox(height: 22),
         ],
-        if (updates case final controller?) ...[
-          const SizedBox(height: 12),
-          UpdatesPanel(controller),
-        ],
-        const SizedBox(height: 22),
-        PageIntro(
-          'Hobbies',
-          'Track practice and set weekly goals.',
-          action: FilledButton.icon(
-            onPressed: () => actions.changeHobby(context),
-            icon: const Icon(Icons.add),
-            label: const Text('New hobby'),
+        if (showHobbies) ...[
+          PageIntro(
+            'Hobbies',
+            'Track practice and set weekly goals.',
+            action: FilledButton.icon(
+              onPressed: () => actions.changeHobby(context),
+              icon: const Icon(Icons.add),
+              label: const Text('New hobby'),
+            ),
           ),
-        ),
-        if (hobbies.isEmpty)
-          const EmptyPanel(
-            'No hobbies yet',
-            'Add something you like doing.',
-            icon: Icons.palette_outlined,
-          ),
-        for (final hobby in hobbies) ...[
-          Builder(
-            builder: (context) {
-              final sessions =
-                  state.sessions
-                      .where((session) => session.hobbyId == hobby.id)
-                      .toList()
-                    ..sort((a, b) => b.at.compareTo(a.at));
-              final minutes = sessions
-                  .where((session) {
-                    final day = dayKey(session.at.toLocal());
-                    return day.compareTo(weekStart) >= 0 &&
-                        day.compareTo(weekEnd) < 0;
-                  })
-                  .fold(0, (value, session) => value + session.minutes);
-              return Panel(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            hobby.name,
-                            style: displayStyle(context, size: 26),
-                          ),
-                        ),
-                        PopupMenuButton<_HobbyMenu>(
-                          tooltip: 'Options for ${hobby.name}',
-                          onSelected: (value) {
-                            switch (value) {
-                              case _HobbyMenu.edit:
-                                actions.changeHobby(context, hobby);
-                              case _HobbyMenu.archive:
-                                actions.archiveHobby(context, hobby);
-                            }
-                          },
-                          itemBuilder: (_) => const [
-                            PopupMenuItem(
-                              value: _HobbyMenu.edit,
-                              child: Text('Edit hobby'),
-                            ),
-                            PopupMenuItem(
-                              value: _HobbyMenu.archive,
-                              child: Text('Archive hobby'),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    Text(
-                      '$minutes of ${hobby.weeklyMinutes} min this week',
-                      style: muted(context),
-                    ),
-                    const SizedBox(height: 8),
-                    LinearProgressIndicator(
-                      value: (minutes / hobby.weeklyMinutes).clamp(0.0, 1.0),
-                      borderRadius: BorderRadius.circular(5),
-                      minHeight: 6,
-                    ),
-                    const SizedBox(height: 10),
-                    OutlinedButton.icon(
-                      onPressed: () => actions.practice(context, hobby),
-                      icon: const Icon(Icons.timer_outlined, size: 18),
-                      label: const Text('Log practice'),
-                    ),
-                    if (sessions.isNotEmpty)
-                      ExpansionTile(
-                        tilePadding: EdgeInsets.zero,
-                        title: Text('Session history (${sessions.length})'),
+          if (hobbies.isEmpty)
+            const EmptyPanel(
+              'No hobbies yet',
+              'Add something you like doing.',
+              icon: Icons.palette_outlined,
+            ),
+          for (final hobby in hobbies) ...[
+            Builder(
+              builder: (context) {
+                final sessions =
+                    state.sessions
+                        .where((session) => session.hobbyId == hobby.id)
+                        .toList()
+                      ..sort((a, b) => b.at.compareTo(a.at));
+                final minutes = sessions
+                    .where((session) {
+                      final day = dayKey(session.at.toLocal());
+                      return day.compareTo(weekStart) >= 0 &&
+                          day.compareTo(weekEnd) < 0;
+                    })
+                    .fold(0, (value, session) => value + session.minutes);
+                return Panel(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
                         children: [
-                          for (final session in sessions)
-                            ListTile(
-                              dense: true,
-                              contentPadding: EdgeInsets.zero,
-                              title: Text(
-                                '${session.minutes} min · ${formattedDate(context, dayKey(session.at.toLocal()))}',
-                              ),
-                              subtitle: session.notes.isEmpty
-                                  ? null
-                                  : Text(session.notes),
+                          Expanded(
+                            child: Text(
+                              hobby.name,
+                              style: displayStyle(context, size: 26),
                             ),
+                          ),
+                          PopupMenuButton<_HobbyMenu>(
+                            tooltip: 'Options for ${hobby.name}',
+                            onSelected: (value) {
+                              switch (value) {
+                                case _HobbyMenu.edit:
+                                  actions.changeHobby(context, hobby);
+                                case _HobbyMenu.archive:
+                                  actions.archiveHobby(context, hobby);
+                              }
+                            },
+                            itemBuilder: (_) => const [
+                              PopupMenuItem(
+                                value: _HobbyMenu.edit,
+                                child: Text('Edit hobby'),
+                              ),
+                              PopupMenuItem(
+                                value: _HobbyMenu.archive,
+                                child: Text('Archive hobby'),
+                              ),
+                            ],
+                          ),
                         ],
                       ),
-                  ],
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 12),
+                      Text(
+                        '$minutes of ${hobby.weeklyMinutes} min this week',
+                        style: muted(context),
+                      ),
+                      const SizedBox(height: 8),
+                      if (phoneStyle(context) != null)
+                        PhoneProgress(
+                          value: (minutes / hobby.weeklyMinutes).clamp(
+                            0.0,
+                            1.0,
+                          ),
+                          label: 'Weekly practice goal',
+                          color: readableColor(
+                            phoneCardColor(context, DashboardCard.hobbies),
+                            panelColor(context),
+                            minRatio: 3,
+                          ),
+                        )
+                      else
+                        LinearProgressIndicator(
+                          value: (minutes / hobby.weeklyMinutes).clamp(
+                            0.0,
+                            1.0,
+                          ),
+                          borderRadius: BorderRadius.circular(5),
+                          minHeight: 6,
+                        ),
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        onPressed: () => actions.practice(context, hobby),
+                        icon: const Icon(Icons.timer_outlined, size: 18),
+                        label: const Text('Log practice'),
+                      ),
+                      if (sessions.isNotEmpty)
+                        ExpansionTile(
+                          expansionAnimationStyle: phoneStyle(context) == null
+                              ? null
+                              : AnimationStyle(
+                                  duration: phoneMotion(context, 220),
+                                ),
+                          tilePadding: EdgeInsets.zero,
+                          title: Text('Session history (${sessions.length})'),
+                          children: [
+                            for (final session in sessions)
+                              ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                title: Text(
+                                  '${session.minutes} min · ${formattedDate(context, dayKey(session.at.toLocal()))}',
+                                ),
+                                subtitle: session.notes.isEmpty
+                                    ? null
+                                    : Text(session.notes),
+                              ),
+                          ],
+                        ),
+                    ],
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+          ],
         ],
       ],
     );

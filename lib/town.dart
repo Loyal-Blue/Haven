@@ -129,11 +129,13 @@ class _TownMapState extends State<TownMap> {
 
   @override
   Widget build(BuildContext context) => ClipRRect(
-    borderRadius: BorderRadius.circular(22),
+    borderRadius: BorderRadius.circular(
+      phoneStyle(context) == null ? 22 : PhoneStyle.radius,
+    ),
     child: SizedBox(
       width: double.infinity,
       child: AspectRatio(
-        aspectRatio: widget.wide ? 1.58 : 1.1,
+        aspectRatio: widget.wide || phoneStyle(context) != null ? 1.58 : 1.1,
         child: LayoutBuilder(
           builder: (context, constraints) {
             final viewport = constraints.biggest;

@@ -7,6 +7,7 @@ import 'package:haven/assistant.dart';
 import 'package:haven/design.dart';
 import 'package:haven/domain.dart';
 import 'package:haven/main.dart';
+import 'package:haven/mobile_preferences.dart';
 import 'package:haven/planner_data.dart';
 import 'package:haven/store.dart';
 import 'package:haven/theme_settings.dart';
@@ -60,6 +61,7 @@ void main() {
 
   test('legacy saves keep their color mode without new settings', () {
     final data = HavenState(theme: ThemePreference.dark).toJson()
+      ..remove('mobile')
       ..remove('appearance')
       ..remove('appearanceUpdatedAt')
       ..remove('taskReset')
@@ -68,6 +70,7 @@ void main() {
     expect(restored.theme, ThemePreference.dark);
     expect(restored.appearance.preset, ThemePreset.classic);
     expect(restored.projects, isEmpty);
+    expect(restored.mobile.order, DashboardCard.values);
   });
 
   test(
@@ -155,6 +158,8 @@ void main() {
     addTearDown(store.dispose);
     await tester.pumpWidget(HavenApp(store: store));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey(Destination.tasks)));
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Open side tabs'));
     await tester.pumpAndSettle();
     expect(find.text('Routine'), findsOneWidget);
@@ -162,7 +167,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Routines'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Settings and hobbies'));
+    await tester.tap(find.byTooltip('More and settings'));
     await tester.pumpAndSettle();
     final appearance = find.text('Appearance');
     await tester.ensureVisible(appearance);
@@ -205,6 +210,87 @@ void main() {
       ),
       findsOneWidget,
     );
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+  testWidgets('mobile card colors, order and preference changes persist', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 840);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final dir = Directory.systemTemp.createTempSync('haven-mobile-options-');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final store = (await tester.runAsync(() => HavenStore.open(dir)))!;
+    addTearDown(store.dispose);
+    await tester.pumpWidget(HavenApp(store: store));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('More and settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Appearance'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Mobile dashboard'));
+    await tester.pumpAndSettle();
+
+    Future<void> saveAction(Finder finder, bool Function() saved) async {
+      await tester.ensureVisible(finder);
+      await tester.tap(finder);
+      await tester.pumpAndSettle();
+      for (var attempt = 0; attempt < 30 && !saved(); attempt++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump();
+      }
+      expect(
+        saved(),
+        isTrue,
+        reason: '$finder left ${store.state.mobile.toJson()}',
+      );
+    }
+
+    await tester.tap(find.text('Dashboard greeting'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField), 'Alex');
+    await saveAction(
+      find.text('Save'),
+      () => store.state.mobile.name == 'Alex',
+    );
+
+    final reorder = find.byTooltip('Move Tasks earlier');
+    await tester.ensureVisible(reorder);
+    await saveAction(
+      reorder,
+      () => store.state.mobile.order.first == DashboardCard.tasks,
+    );
+    await tester.tap(find.text('Tasks'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, '#C3A4EE');
+    await tester.pumpAndSettle();
+    await saveAction(
+      find.text('Apply'),
+      () => store.state.mobile.colors[DashboardCard.tasks] == 0xc3a4ee,
+    );
+    await tester.tap(find.byType(DropdownButtonFormField<MobileMotion>));
+    await tester.pumpAndSettle();
+    await saveAction(
+      find.text('Off').last,
+      () => store.state.mobile.motion == MobileMotion.still,
+    );
+
+    final saved = (await tester.runAsync(() async {
+      final reopened = await HavenStore.open(dir);
+      try {
+        return reopened.state.mobile;
+      } finally {
+        reopened.dispose();
+      }
+    }))!;
+    expect(saved.name, 'Alex');
+    expect(saved.order.first, DashboardCard.tasks);
+    expect(saved.colors[DashboardCard.tasks], 0xc3a4ee);
+    expect(saved.motion, MobileMotion.still);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });

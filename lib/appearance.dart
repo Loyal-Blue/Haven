@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import 'actions.dart';
 import 'design.dart';
 import 'domain.dart';
+import 'mobile_preferences.dart';
 import 'theme_settings.dart';
 
 class AppearanceScreen extends StatelessWidget {
@@ -33,6 +34,25 @@ class AppearanceScreen extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
               children: [
                 _Preview(colors: colors),
+                if (phoneStyle(context) != null) ...[
+                  const SizedBox(height: PhoneStyle.gap),
+                  Panel(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: ListTile(
+                      leading: const Icon(Icons.dashboard_customize_outlined),
+                      title: const Text('Mobile dashboard'),
+                      subtitle: const Text(
+                        'Greeting, card colors, order and motion',
+                      ),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => _PhoneOptions(actions),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 18),
                 Text('Theme presets', style: displayStyle(context, size: 24)),
                 const SizedBox(height: 8),
@@ -336,11 +356,13 @@ class _Preview extends StatelessWidget {
 
 class _ColorEditor extends StatefulWidget {
   const _ColorEditor({
-    required this.token,
+    this.token,
+    this.card,
     required this.state,
     required this.initial,
   });
-  final ThemeToken token;
+  final ThemeToken? token;
+  final DashboardCard? card;
   final HavenState state;
   final Color initial;
   @override
@@ -370,15 +392,16 @@ class _ColorEditorState extends State<_ColorEditor> {
   Widget build(BuildContext context) {
     final current = widget.state.appearance;
     final value = color.toColor().toARGB32() & 0xffffff;
+    final token = widget.token;
     final preview = current.copyWith(
       preset: ThemePreset.custom,
       base: current.preset == ThemePreset.custom
           ? current.base
           : current.preset,
-      colors: {...current.colors, widget.token: value},
+      colors: {...current.colors, ?token: value},
     );
     return AlertDialog(
-      title: Text(widget.token.label),
+      title: Text(token?.label ?? widget.card!.label),
       scrollable: true,
       content: SizedBox(
         width: 360,
@@ -386,10 +409,16 @@ class _ColorEditorState extends State<_ColorEditor> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _Preview(
-              colors: makePalette(Theme.of(context).brightness, preview),
-            ),
-            const SizedBox(height: 10),
+            if (token != null) ...[
+              _Preview(
+                colors: makePalette(
+                  Theme.of(context).brightness,
+                  preview,
+                  mobile: phoneStyle(context) != null,
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
             SizedBox(
               height: 44,
               child: DecoratedBox(
@@ -444,4 +473,196 @@ class _ColorEditorState extends State<_ColorEditor> {
       ],
     );
   }
+}
+
+class _PhoneOptions extends StatelessWidget {
+  const _PhoneOptions(this.actions);
+  final HavenActions actions;
+
+  void save(
+    BuildContext context,
+    MobilePreferences Function(MobilePreferences) edit,
+  ) {
+    actions.run(context, (state) => state.copyWith(mobile: edit(state.mobile)));
+  }
+
+  void move(BuildContext context, DashboardCard card, int offset) {
+    save(context, (current) {
+      final items = [...current.order];
+      final index = items.indexOf(card);
+      final destination = index + offset;
+      if (destination >= 0 && destination < items.length) {
+        items.removeAt(index);
+        items.insert(destination, card);
+      }
+      return current.copyWith(order: items);
+    });
+  }
+
+  Future<void> editName(BuildContext context, String initial) async {
+    var name = initial;
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Dashboard greeting'),
+        content: TextFormField(
+          initialValue: initial,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          maxLength: 40,
+          decoration: const InputDecoration(labelText: 'Your name'),
+          onChanged: (value) => name = value,
+          onFieldSubmitted: (value) => Navigator.pop(context, value.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, name.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (result != null && context.mounted) {
+      save(context, (current) => current.copyWith(name: result));
+    }
+  }
+
+  Future<void> editColor(
+    BuildContext context,
+    HavenState state,
+    DashboardCard card,
+  ) async {
+    final value = await showDialog<int>(
+      context: context,
+      builder: (_) => _ColorEditor(
+        card: card,
+        state: state,
+        initial: rgb(state.mobile.colors[card] ?? card.color),
+      ),
+    );
+    if (value != null && context.mounted) {
+      save(
+        context,
+        (current) => current.copyWith(colors: {...current.colors, card: value}),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Mobile dashboard')),
+    body: ListenableBuilder(
+      listenable: actions.store,
+      builder: (context, _) {
+        final state = actions.store.state;
+        final preferences = state.mobile;
+        final monochrome = palette(context).monochrome;
+        return ListView(
+          padding: const EdgeInsets.all(PhoneStyle.edge),
+          children: [
+            Panel(
+              child: Column(
+                children: [
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Dashboard greeting'),
+                    subtitle: Text(
+                      preferences.name.isEmpty
+                          ? 'Welcome to Haven'
+                          : preferences.name,
+                    ),
+                    trailing: const Icon(Icons.edit_outlined),
+                    onTap: () => editName(context, preferences.name),
+                  ),
+                  const SizedBox(height: PhoneStyle.gap),
+                  DropdownButtonFormField<MobileMotion>(
+                    initialValue: preferences.motion,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Animation intensity',
+                    ),
+                    items: [
+                      for (final intensity in MobileMotion.values)
+                        DropdownMenuItem(
+                          value: intensity,
+                          child: Text(intensity.label),
+                        ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        save(
+                          context,
+                          (current) => current.copyWith(motion: value),
+                        );
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: PhoneStyle.section),
+            Text('Dashboard cards', style: displayStyle(context, size: 24)),
+            const SizedBox(height: 4),
+            Text(
+              monochrome
+                  ? 'Turn off Black & White to edit card colors.'
+                  : 'Tap a card to change its color.',
+            ),
+            const SizedBox(height: PhoneStyle.gap),
+            Panel(
+              padding: const EdgeInsets.all(8),
+              child: Column(
+                children: [
+                  for (final (index, card) in preferences.order.indexed)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.only(left: 4),
+                            leading: _Swatch(phoneCardColor(context, card)),
+                            title: Text(card.label),
+                            onTap: monochrome
+                                ? null
+                                : () => editColor(context, state, card),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Move ${card.label} earlier',
+                          onPressed: index == 0
+                              ? null
+                              : () => move(context, card, -1),
+                          icon: const Icon(Icons.keyboard_arrow_up_rounded),
+                        ),
+                        IconButton(
+                          tooltip: 'Move ${card.label} later',
+                          onPressed: index == preferences.order.length - 1
+                              ? null
+                              : () => move(context, card, 1),
+                          icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: PhoneStyle.gap),
+            OutlinedButton(
+              onPressed: () => save(
+                context,
+                (current) => current.copyWith(
+                  order: DashboardCard.values,
+                  colors: const {},
+                ),
+              ),
+              child: const Text('Restore default cards'),
+            ),
+          ],
+        );
+      },
+    ),
+  );
 }

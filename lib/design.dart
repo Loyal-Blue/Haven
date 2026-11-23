@@ -1,9 +1,71 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'domain.dart';
+import 'mobile_preferences.dart';
 import 'theme_settings.dart';
+
+bool get havenPhone =>
+    !kIsWeb &&
+    (defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS);
+
+class PhoneStyle extends ThemeExtension<PhoneStyle> {
+  const PhoneStyle(this.preferences, this.highContrast);
+  final MobilePreferences preferences;
+  final bool highContrast;
+
+  static const edge = 16.0;
+  static const gap = 12.0;
+  static const section = 24.0;
+  static const radius = 24.0;
+  static const touch = 48.0;
+  static const maxPageWidth = 620.0;
+  static const accent = Color(0xffffbe3d);
+  static const paper = Color(0xfff7f6f2);
+  static const charcoal = Color(0xff20201f);
+  static const darkSurface = Color(0xff2c2b29);
+
+  @override
+  PhoneStyle copyWith() => this;
+  @override
+  PhoneStyle lerp(PhoneStyle? other, double t) => other ?? this;
+}
+
+PhoneStyle? phoneStyle(BuildContext context) =>
+    Theme.of(context).extension<PhoneStyle>();
+
+Duration phoneMotion(BuildContext context, int milliseconds) {
+  if (MediaQuery.disableAnimationsOf(context)) return Duration.zero;
+  final intensity = phoneStyle(context)?.preferences.motion.factor ?? 1;
+  return Duration(milliseconds: (milliseconds * intensity).round());
+}
+
+Color phoneCardColor(BuildContext context, DashboardCard card) {
+  final theme = Theme.of(context);
+  final tokens = palette(context);
+  if (tokens.monochrome) return theme.colorScheme.surface;
+  final style = phoneStyle(context);
+  final color = rgb(style?.preferences.colors[card] ?? card.color);
+  if (theme.brightness == Brightness.light &&
+      (!(style?.highContrast ?? false) ||
+          color.computeLuminance() >= .30 ||
+          color.computeLuminance() <= .10)) {
+    return color;
+  }
+  if (theme.brightness == Brightness.light) {
+    return Color.lerp(color, Colors.white, .48)!;
+  }
+  return Color.lerp(PhoneStyle.darkSurface, color, .28)!;
+}
+
+Color phoneInk(BuildContext context, Color background) => readableColor(
+  palette(context)[ThemeToken.text],
+  background,
+  minRatio: (phoneStyle(context)?.highContrast ?? false) ? 7 : 4.5,
+);
 
 class HavenPalette extends ThemeExtension<HavenPalette> {
   const HavenPalette(this.colors, this.monochrome, this.reducedMotion);
@@ -55,7 +117,11 @@ Color readableColor(
   return endpoint;
 }
 
-HavenPalette makePalette(Brightness brightness, ThemeSettings settings) {
+HavenPalette makePalette(
+  Brightness brightness,
+  ThemeSettings settings, {
+  bool mobile = false,
+}) {
   final base = settings.preset == ThemePreset.custom
       ? settings.base
       : settings.preset;
@@ -103,6 +169,20 @@ HavenPalette makePalette(Brightness brightness, ThemeSettings settings) {
     ThemeToken.event: rgb(0x96c7d1),
     ThemeToken.my: rgb(0xead5a6),
     ThemeToken.more: rgb(0xbdafd9),
+    if (mobile) ...{
+      if (base == ThemePreset.classic) ...{
+        ThemeToken.primary: PhoneStyle.accent,
+        ThemeToken.progress: PhoneStyle.accent,
+        ThemeToken.background: dark ? PhoneStyle.charcoal : PhoneStyle.paper,
+        ThemeToken.surface: dark ? PhoneStyle.darkSurface : Colors.white,
+        ThemeToken.navigation: dark ? PhoneStyle.darkSurface : Colors.white,
+      },
+      if (dark) ...{
+        ThemeToken.background: PhoneStyle.charcoal,
+        ThemeToken.surface: PhoneStyle.darkSurface,
+        ThemeToken.navigation: PhoneStyle.darkSurface,
+      },
+    },
     if (settings.preset == ThemePreset.custom)
       for (final entry in settings.colors.entries) entry.key: rgb(entry.value),
   };
@@ -129,8 +209,10 @@ HavenPalette makePalette(Brightness brightness, ThemeSettings settings) {
 ThemeData havenTheme(
   Brightness brightness, [
   ThemeSettings settings = const ThemeSettings(),
+  MobilePreferences? phone,
 ]) {
-  final tokens = makePalette(brightness, settings);
+  final mobile = phone != null;
+  final tokens = makePalette(brightness, settings, mobile: mobile);
   final mono = tokens.monochrome;
   final background = tokens[ThemeToken.background];
   final surface = tokens[ThemeToken.surface];
@@ -208,7 +290,21 @@ ThemeData havenTheme(
   );
   final base = ThemeData(
     colorScheme: scheme,
-    extensions: [tokens],
+    extensions: [
+      tokens,
+      if (phone != null) PhoneStyle(phone, settings.highContrast),
+    ],
+    visualDensity: mobile ? VisualDensity.standard : null,
+    materialTapTargetSize: mobile ? MaterialTapTargetSize.padded : null,
+    appBarTheme: mobile
+        ? AppBarTheme(
+            backgroundColor: background,
+            foregroundColor: canvasInk,
+            elevation: 0,
+            scrolledUnderElevation: 0,
+            centerTitle: true,
+          )
+        : null,
     fontFamily: 'DM Sans',
     scaffoldBackgroundColor: background,
     dividerColor: soft,
@@ -223,14 +319,22 @@ ThemeData havenTheme(
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         minimumSize: const Size(48, 48),
+        backgroundColor: mobile ? tokens[ThemeToken.primary] : null,
+        foregroundColor: mobile
+            ? readableColor(ink, tokens[ThemeToken.primary], minRatio: contrast)
+            : null,
         textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(mobile ? PhoneStyle.radius : 14),
+        ),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         minimumSize: const Size(48, 48),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(mobile ? PhoneStyle.radius : 14),
+        ),
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
@@ -252,8 +356,8 @@ TextStyle muted(BuildContext context, {double size = 13}) =>
     TextStyle(fontSize: size, fontWeight: FontWeight.w400);
 
 TextStyle displayStyle(BuildContext context, {double size = 34}) => TextStyle(
-  fontFamily: 'Haven Serif',
-  fontWeight: FontWeight.w600,
+  fontFamily: phoneStyle(context) == null ? 'Haven Serif' : 'DM Sans',
+  fontWeight: phoneStyle(context) == null ? FontWeight.w600 : FontWeight.w700,
   height: 1.1,
   fontSize: size,
   letterSpacing: -.75,
@@ -273,9 +377,13 @@ class Panel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final mobile = phoneStyle(context) != null;
+    final mono = palette(context).monochrome;
     final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(22),
-      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+      borderRadius: BorderRadius.circular(mobile ? PhoneStyle.radius : 22),
+      side: mobile && !mono && !(phoneStyle(context)?.highContrast ?? false)
+          ? BorderSide.none
+          : BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
     );
     return DecoratedBox(
       decoration: ShapeDecoration(
@@ -285,8 +393,8 @@ class Panel extends StatelessWidget {
             : [
                 BoxShadow(
                   color: Theme.of(context).colorScheme.shadow
-                      .withValues(alpha: .07),
-                  offset: Offset(0, 4),
+                      .withValues(alpha: mobile ? .045 : .07),
+                  offset: const Offset(0, 4),
                   blurRadius: 10,
                 ),
               ],
@@ -385,8 +493,23 @@ IconData categoryIcon(TaskCategory category) => switch (category) {
   TaskCategory.work => Icons.work_outline_rounded,
 };
 
-void showNotice(BuildContext context, String message) {
+void showNotice(BuildContext context, String message, {IconData? icon}) {
   ScaffoldMessenger.of(context)
     ..removeCurrentSnackBar()
-    ..showSnackBar(SnackBar(content: Text(message)));
+    ..showSnackBar(
+      SnackBar(
+        content: icon == null
+            ? Text(message)
+            : Row(
+                children: [
+                  Icon(
+                    icon,
+                    color: Theme.of(context).colorScheme.onInverseSurface,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(message)),
+                ],
+              ),
+      ),
+    );
 }

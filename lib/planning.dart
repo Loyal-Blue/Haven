@@ -3,6 +3,8 @@ import 'package:material_ui/material_ui.dart';
 import 'actions.dart';
 import 'design.dart';
 import 'domain.dart';
+import 'mobile_preferences.dart';
+import 'mobile_widgets.dart';
 import 'planner_data.dart';
 import 'screens.dart';
 import 'theme_settings.dart';
@@ -323,6 +325,9 @@ class ProjectsScreen extends StatelessWidget {
         Panel(
           padding: const EdgeInsets.all(9),
           child: ExpansionTile(
+            expansionAnimationStyle: phoneStyle(context) == null
+                ? null
+                : AnimationStyle(duration: phoneMotion(context, 220)),
             tilePadding: const EdgeInsets.symmetric(horizontal: 7),
             title: Text(project.title, style: displayStyle(context, size: 22)),
             subtitle: Text(
@@ -427,6 +432,29 @@ class _ReportsScreenState extends State<ReportsScreen> {
       theme.colorScheme.surface,
       minRatio: 3,
     );
+    final phone = phoneStyle(context) != null;
+    final daysPracticed = practices
+        .map((p) => dayKey(p.at.toLocal()))
+        .toSet()
+        .length;
+    final weekHistory = history.where(
+      (week) =>
+          week.week.compareTo(first) >= 0 && week.week.compareTo(until) < 0,
+    );
+    final projected = !monthly && offset == 0;
+    final built = projected
+        ? progress.buildings
+        : weekHistory.fold(0, (sum, week) => sum + week.buildings);
+    final potential =
+        WeekProgress.maxBuildings * (projected ? 1 : weekHistory.length);
+    final subtaskCount = milestones.fold(
+      0,
+      (sum, project) => sum + state.projectTasks(project.id).length,
+    );
+    final subtaskDone = milestones.fold(
+      0,
+      (sum, project) => sum + state.projectCompleted(project.id),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -484,27 +512,73 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   ),
                 ],
               ),
-              Wrap(
-                alignment: WrapAlignment.spaceBetween,
-                spacing: 9,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  Text(
-                    '${progress.percent}%',
-                    style: displayStyle(context, size: 37),
-                  ),
-                  Text(
-                    '${progress.completed} of ${progress.planned} tasks complete',
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              LinearProgressIndicator(
-                value: progress.fraction,
-                semanticsLabel: 'Completion percentage',
-              ),
-              const SizedBox(height: 16),
+              if (phone) ...[
+                const SizedBox(height: 12),
+                Text(
+                  '${progress.percent}%',
+                  textAlign: TextAlign.center,
+                  style: displayStyle(context, size: 54),
+                ),
+                Text(
+                  '${progress.completed} of ${progress.planned} tasks complete',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: PhoneStyle.section),
+                Text(
+                  'Progress breakdown',
+                  style: displayStyle(context, size: 21),
+                ),
+                const SizedBox(height: PhoneStyle.gap),
+                PhonePills(
+                  metrics: [
+                    (
+                      label: 'Tasks',
+                      fraction: progress.fraction,
+                      card: DashboardCard.tasks,
+                    ),
+                    (
+                      label: 'Habits',
+                      fraction: daysPracticed / days,
+                      card: DashboardCard.hobbies,
+                    ),
+                    (
+                      label: projected ? 'Town forecast' : 'Town growth',
+                      fraction: potential == 0 ? 0.0 : built / potential,
+                      card: DashboardCard.town,
+                    ),
+                    (
+                      label: 'Milestone tasks',
+                      fraction: subtaskCount == 0
+                          ? 0.0
+                          : subtaskDone / subtaskCount,
+                      card: DashboardCard.assistant,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: PhoneStyle.section),
+              ] else ...[
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  spacing: 9,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      '${progress.percent}%',
+                      style: displayStyle(context, size: 37),
+                    ),
+                    Text(
+                      '${progress.completed} of ${progress.planned} tasks complete',
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                LinearProgressIndicator(
+                  value: progress.fraction,
+                  semanticsLabel: 'Completion percentage',
+                ),
+                const SizedBox(height: 16),
+              ],
               Text('Task activity', style: displayStyle(context, size: 21)),
               const SizedBox(height: 9),
               SizedBox(
@@ -570,9 +644,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
             children: [
               Text('Habit consistency', style: displayStyle(context, size: 23)),
               const SizedBox(height: 7),
-              Text(
-                '${practices.map((p) => dayKey(p.at.toLocal())).toSet().length} of $days days practiced',
-              ),
+              Text('$daysPracticed of $days days practiced'),
               for (final hobby in state.hobbies.where((h) => !h.archived))
                 Text(
                   '${hobby.name} · ${practices.where((e) => e.hobbyId == hobby.id).fold(0, (total, e) => total + e.minutes)} min',

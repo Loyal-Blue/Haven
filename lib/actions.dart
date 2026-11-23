@@ -75,7 +75,11 @@ class HavenActions {
       return next;
     });
     if (result != null && completed && context.mounted) {
-      showNotice(context, 'Task completed.');
+      showNotice(
+        context,
+        'Task completed.',
+        icon: phoneStyle(context) == null ? null : Icons.auto_awesome_rounded,
+      );
     }
   }
 

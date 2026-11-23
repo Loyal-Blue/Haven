@@ -1,3 +1,5 @@
+import 'mobile_preferences.dart';
+
 import 'dart:math';
 
 import 'theme_settings.dart';
@@ -479,6 +481,7 @@ class HavenState {
     this.theme = ThemePreference.system,
     this.appearance = const ThemeSettings(),
     this.appearanceUpdatedAt = 0,
+    this.mobile = const MobilePreferences(),
     this.expansion,
     this.taskReset = const TaskReset(),
     List<Project> projects = const [],
@@ -502,6 +505,7 @@ class HavenState {
   final ThemePreference theme;
   final ThemeSettings appearance;
   final int appearanceUpdatedAt;
+  final MobilePreferences mobile;
   final TownExpansion? expansion;
   final TaskReset taskReset;
   final List<Project> projects;
@@ -606,6 +610,7 @@ class HavenState {
     ThemePreference? theme,
     ThemeSettings? appearance,
     int? appearanceUpdatedAt,
+    MobilePreferences? mobile,
     TownExpansion? expansion,
     TaskReset? taskReset,
     List<Project>? projects,
@@ -621,6 +626,7 @@ class HavenState {
     theme: theme ?? this.theme,
     appearance: appearance ?? this.appearance,
     appearanceUpdatedAt: appearanceUpdatedAt ?? this.appearanceUpdatedAt,
+    mobile: mobile ?? this.mobile,
     expansion: expansion ?? this.expansion,
     taskReset: taskReset ?? this.taskReset,
     projects: projects ?? this.projects,
@@ -639,6 +645,7 @@ class HavenState {
     'theme': theme.name,
     'appearance': appearance.toJson(),
     'appearanceUpdatedAt': appearanceUpdatedAt,
+    'mobile': mobile.toJson(),
     if (expansion != null) 'expansion': expansion!.toJson(),
     'taskReset': taskReset.toJson(),
     'projects': projects.map((project) => project.toJson()).toList(),
@@ -660,6 +667,7 @@ class HavenState {
       theme: ThemePreference.values.byName(json['theme']),
       appearance: ThemeSettings.fromJson(json['appearance'] as Json?),
       appearanceUpdatedAt: json['appearanceUpdatedAt'] as int? ?? 0,
+      mobile: MobilePreferences.fromJson(json['mobile']),
       expansion: json['expansion'] == null
           ? null
           : TownExpansion.fromJson(json['expansion'] as Json),

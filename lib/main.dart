@@ -1,3 +1,6 @@
+import 'mobile_home.dart';
+import 'mobile_preferences.dart';
+
 import 'dart:async';
 import 'dart:io';
 
@@ -107,17 +110,20 @@ class HavenApp extends StatelessWidget {
     builder: (context, _) {
       final state = store.state;
       final appearance = state.appearance;
+      final mobile = havenPhone ? state.mobile : null;
       final reduce =
           appearance.reducedMotion ||
           MediaQueryData.fromView(View.of(context)).disableAnimations;
       return MaterialApp(
         title: 'Haven',
         debugShowCheckedModeBanner: false,
-        theme: havenTheme(Brightness.light, appearance),
-        darkTheme: havenTheme(Brightness.dark, appearance),
+        theme: havenTheme(Brightness.light, appearance, mobile),
+        darkTheme: havenTheme(Brightness.dark, appearance, mobile),
         themeAnimationDuration: reduce || appearance.mono != Mono.off
             ? Duration.zero
-            : const Duration(milliseconds: 220),
+            : Duration(
+                milliseconds: (220 * (mobile?.motion.factor ?? 1)).round(),
+              ),
         themeMode: switch ((appearance.mono, appearance.preset, state.theme)) {
           (Mono.white, _, _) => ThemeMode.light,
           (Mono.black, _, _) => ThemeMode.dark,
@@ -131,7 +137,9 @@ class HavenApp extends StatelessWidget {
           return MediaQuery(
             data: media.copyWith(
               disableAnimations:
-                  media.disableAnimations || appearance.reducedMotion,
+                  media.disableAnimations ||
+                  appearance.reducedMotion ||
+                  mobile?.motion == MobileMotion.still,
               textScaler: _FontScaler(media.textScaler, appearance.fontScale),
             ),
             child: child!,
@@ -168,7 +176,8 @@ enum Destination {
   money('Money', Icons.account_balance_wallet_outlined, ThemeToken.my),
   projects('Projects', Icons.folder_outlined, ThemeToken.my),
   reports('Reports', Icons.bar_chart_rounded, ThemeToken.my),
-  assistant('AI', Icons.auto_awesome_outlined, ThemeToken.more);
+  assistant('AI', Icons.auto_awesome_outlined, ThemeToken.more),
+  hobbies('Hobbies', Icons.eco_outlined, ThemeToken.routine);
 
   const Destination(this.label, this.icon, this.token);
   final String label;
@@ -177,7 +186,7 @@ enum Destination {
 
   Destination get section => switch (this) {
     money || projects || reports => my,
-    assistant => more,
+    assistant || hobbies => more,
     _ => this,
   };
 }
@@ -210,6 +219,7 @@ class HavenShell extends StatefulWidget {
 class _HavenShellState extends State<HavenShell> with WidgetsBindingObserver {
   Destination destination = Destination.town;
   int district = 0;
+  String? dashboardDay, plannerDay;
   late String today;
   late Timer dateTimer;
   late AssistantSession assistant;
@@ -311,18 +321,105 @@ class _HavenShellState extends State<HavenShell> with WidgetsBindingObserver {
     }
   }
 
-  void selectTab(Destination value) => setState(() => destination = value);
+  void selectTab(Destination value) => setState(() {
+    if (havenPhone && value == Destination.planner && value != destination) {
+      plannerDay = selectedDay;
+    }
+    destination = value;
+  });
 
   void selectDistrict(int value) {
     if (value < 0 || value >= widget.store.state.districtCount) return;
     setState(() => district = value);
   }
 
+  String get selectedDay {
+    final saved = dashboardDay;
+    final week = localWeekStart(dateFromKey(today));
+    if (saved == null ||
+        saved.compareTo(dayKey(week)) < 0 ||
+        saved.compareTo(dayKey(calendarDay(week, 6))) > 0) {
+      return today;
+    }
+    return saved;
+  }
+
+  void openCard(DashboardCard card) => selectTab(switch (card) {
+    DashboardCard.town => Destination.town,
+    DashboardCard.tasks => Destination.tasks,
+    DashboardCard.money => Destination.money,
+    DashboardCard.hobbies => Destination.hobbies,
+    DashboardCard.assistant => Destination.assistant,
+    DashboardCard.calendar => Destination.planner,
+  });
+
+  Future<void> quickAdd(BuildContext context) async {
+    final duration = phoneMotion(context, 210);
+    final choice = await showModalBottomSheet<int>(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      sheetAnimationStyle: AnimationStyle(
+        duration: duration,
+        reverseDuration: duration,
+      ),
+      builder: (context) => SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(
+            PhoneStyle.edge,
+            0,
+            PhoneStyle.edge,
+            8,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Quick add', style: displayStyle(context, size: 25)),
+              for (final (index, label, icon) in const [
+                (0, 'New task', Icons.task_alt_rounded),
+                (1, 'New routine', Icons.repeat_rounded),
+                (2, 'Photo tasks', Icons.add_a_photo_outlined),
+                (3, 'New transaction', Icons.account_balance_wallet_outlined),
+                (4, 'New hobby', Icons.eco_outlined),
+              ])
+                ListTile(
+                  leading: Icon(icon),
+                  title: Text(label),
+                  onTap: () => Navigator.pop(context, index),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!context.mounted) return;
+    final day = switch (destination) {
+      Destination.town => selectedDay,
+      Destination.planner => plannerDay ?? today,
+      _ => today,
+    };
+    switch (choice) {
+      case 0:
+        await actions.changeTask(context, day);
+      case 1:
+        await actions.changeTask(context, day, null, null, Repeat.daily);
+      case 2:
+        selectTab(Destination.assistant);
+      case 3:
+        await actions.changeMoney(context, today);
+      case 4:
+        await actions.changeHobby(context);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      final wide = constraints.maxWidth >= 880;
-      final tabsVisible = wide || constraints.maxWidth >= 390;
+      final phone = phoneStyle(context) != null;
+      final wide = !phone && constraints.maxWidth >= 880;
+      final tabsVisible = !phone && (wide || constraints.maxWidth >= 390);
       final reduced = MediaQuery.disableAnimationsOf(context);
       return Scaffold(
         drawer: tabsVisible
@@ -355,7 +452,21 @@ class _HavenShellState extends State<HavenShell> with WidgetsBindingObserver {
               Expanded(
                 child: Column(
                   children: [
-                    if (!wide)
+                    if (phone && destination == Destination.town)
+                      PhoneGreeting(
+                        name: widget.store.state.mobile.name,
+                        today: today,
+                        onMore: () => selectTab(Destination.more),
+                      ),
+                    if (phone && destination != Destination.town)
+                      Builder(
+                        builder: (context) => _PhoneHeader(
+                          onMenu: Scaffold.of(context).openDrawer,
+                          onMore: () => selectTab(Destination.more),
+                          selected: destination.section == Destination.more,
+                        ),
+                      ),
+                    if (!phone && !wide)
                       Builder(
                         builder: (context) => _MobileHeader(
                           onMenu: tabsVisible
@@ -376,27 +487,58 @@ class _HavenShellState extends State<HavenShell> with WidgetsBindingObserver {
                         builder: (context, _) {
                           final state = widget.store.state;
                           return AnimatedSwitcher(
-                            duration: reduced
+                            duration: phone
+                                ? phoneMotion(context, 220)
+                                : reduced
                                 ? Duration.zero
                                 : const Duration(milliseconds: 170),
                             child: SingleChildScrollView(
                               key: PageStorageKey(destination),
                               padding: EdgeInsets.fromLTRB(
-                                wide ? 32 : 10,
-                                wide ? 26 : 13,
-                                wide ? 32 : 13,
+                                phone
+                                    ? PhoneStyle.edge
+                                    : wide
+                                    ? 32
+                                    : 10,
+                                phone
+                                    ? 12
+                                    : wide
+                                    ? 26
+                                    : 13,
+                                phone
+                                    ? PhoneStyle.edge
+                                    : wide
+                                    ? 32
+                                    : 13,
                                 18,
                               ),
                               child: Center(
                                 child: ConstrainedBox(
                                   constraints: BoxConstraints(
-                                    maxWidth: destination == Destination.town
+                                    maxWidth: phone
+                                        ? PhoneStyle.maxPageWidth
+                                        : destination == Destination.town
                                         ? 1160
                                         : 770,
                                   ),
                                   child: SizedBox(
                                     width: double.infinity,
                                     child: switch (destination) {
+                                      Destination.town when phone =>
+                                        PhoneDashboard(
+                                          state: state,
+                                          actions: actions,
+                                          today: today,
+                                          day: selectedDay,
+                                          district: district,
+                                          onDay: (day) => setState(
+                                            () => dashboardDay = day,
+                                          ),
+                                          onDistrict: selectDistrict,
+                                          onCard: openCard,
+                                          onReports: () =>
+                                              selectTab(Destination.reports),
+                                        ),
                                       Destination.town => _town(
                                         context,
                                         state,
@@ -413,6 +555,10 @@ class _HavenShellState extends State<HavenShell> with WidgetsBindingObserver {
                                             selectTab(Destination.assistant),
                                       ),
                                       Destination.planner => PlannerScreen(
+                                        initialDay: phone ? plannerDay : null,
+                                        onDateSelected: phone
+                                            ? (day) => plannerDay = day
+                                            : null,
                                         state: state,
                                         actions: actions,
                                         today: today,
@@ -445,14 +591,24 @@ class _HavenShellState extends State<HavenShell> with WidgetsBindingObserver {
                                         ],
                                         onSelect: selectTab,
                                       ),
+                                      Destination.hobbies => MoreScreen(
+                                        state: state,
+                                        actions: actions,
+                                        today: today,
+                                        showSettings: false,
+                                      ),
                                       Destination.more => Column(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.stretch,
                                         children: [
                                           _Hub(
                                             title: 'More',
-                                            items: const [
+                                            items: [
                                               Destination.assistant,
+                                              if (phone) ...[
+                                                Destination.routine,
+                                                Destination.hobbies,
+                                              ],
                                             ],
                                             onSelect: selectTab,
                                           ),
@@ -463,6 +619,7 @@ class _HavenShellState extends State<HavenShell> with WidgetsBindingObserver {
                                             state: state,
                                             actions: actions,
                                             today: today,
+                                            showHobbies: !phone,
                                           ),
                                         ],
                                       ),
@@ -481,7 +638,13 @@ class _HavenShellState extends State<HavenShell> with WidgetsBindingObserver {
             ],
           ),
         ),
-        bottomNavigationBar: wide
+        bottomNavigationBar: phone
+            ? _PhoneNav(
+                current: destination,
+                onSelect: selectTab,
+                onAdd: () => quickAdd(context),
+              )
+            : wide
             ? null
             : _MobileNav(current: destination, onSelect: selectTab),
       );
@@ -746,6 +909,205 @@ class _MobileHeader extends StatelessWidget {
       ],
     ),
   );
+}
+
+class _PhoneHeader extends StatelessWidget {
+  const _PhoneHeader({
+    required this.onMenu,
+    required this.onMore,
+    required this.selected,
+  });
+  final VoidCallback onMenu, onMore;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected
+        ? palette(context)[ThemeToken.primary]
+        : panelColor(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        PhoneStyle.edge,
+        3,
+        PhoneStyle.edge,
+        0,
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: 'Open side tabs',
+            onPressed: onMenu,
+            style: IconButton.styleFrom(backgroundColor: panelColor(context)),
+            icon: const Icon(Icons.menu_rounded),
+          ),
+          Expanded(
+            child: Text(
+              'Haven',
+              textAlign: TextAlign.center,
+              style: displayStyle(context, size: 19),
+            ),
+          ),
+          IconButton(
+            tooltip: 'More and settings',
+            onPressed: onMore,
+            style: IconButton.styleFrom(
+              backgroundColor: color,
+              foregroundColor: phoneInk(context, color),
+            ),
+            icon: const Icon(Icons.person_outline_rounded),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PhoneNav extends StatelessWidget {
+  const _PhoneNav({
+    required this.current,
+    required this.onSelect,
+    required this.onAdd,
+  });
+  final Destination current;
+  final ValueChanged<Destination> onSelect;
+  final VoidCallback onAdd;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = palette(context);
+    final surface = colors[ThemeToken.navigation];
+    final accent = colors[ThemeToken.primary];
+    final active = current == Destination.routine
+        ? Destination.tasks
+        : current.section;
+    final scheme = Theme.of(context).colorScheme;
+    return SafeArea(
+      top: false,
+      minimum: const EdgeInsets.fromLTRB(8, 5, 8, 8),
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        heightFactor: 1,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 650),
+          child: Material(
+            color: surface,
+            elevation: colors.monochrome ? 0 : 3,
+            shadowColor: scheme.shadow.withValues(alpha: .09),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(26),
+              side: colors.monochrome
+                  ? BorderSide(color: scheme.outlineVariant)
+                  : BorderSide.none,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
+              child: Row(
+                children: [
+                  for (final destination in const [
+                    Destination.town,
+                    Destination.tasks,
+                    Destination.planner,
+                    Destination.my,
+                  ]) ...[
+                    if (destination == Destination.planner)
+                      SizedBox(
+                        width: 56,
+                        child: IconButton(
+                          tooltip: 'Quick add',
+                          onPressed: onAdd,
+                          icon: const Icon(Icons.add_rounded, size: 27),
+                          style: IconButton.styleFrom(
+                            fixedSize: const Size.square(52),
+                            backgroundColor: accent,
+                            foregroundColor: phoneInk(context, accent),
+                          ),
+                        ),
+                      ),
+                    Expanded(
+                      child: _PhoneNavTab(
+                        key: ValueKey(destination),
+                        destination: destination,
+                        selected: active == destination,
+                        onTap: () => onSelect(destination),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PhoneNavTab extends StatelessWidget {
+  const _PhoneNavTab({
+    super.key,
+    required this.destination,
+    required this.selected,
+    required this.onTap,
+  });
+  final Destination destination;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = palette(context);
+    final accent = colors[ThemeToken.primary];
+    final surface = colors[ThemeToken.navigation];
+    final highlight = colors.monochrome
+        ? accent
+        : Color.lerp(surface, accent, .30)!;
+    final card = selected ? highlight : surface;
+    final ink = phoneInk(context, card);
+    final duration = phoneMotion(context, 160);
+    final label = destination.label;
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: Tooltip(
+        message: label,
+        excludeFromSemantics: true,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(18),
+          child: AnimatedContainer(
+            duration: duration,
+            constraints: const BoxConstraints(
+              minHeight: 54,
+              minWidth: PhoneStyle.touch,
+            ),
+            padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 2),
+            decoration: BoxDecoration(
+              color: card,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(destination.icon, color: ink, size: 22),
+                const SizedBox(height: 2),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: ink,
+                    fontSize: 11,
+                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _MobileNav extends StatelessWidget {
